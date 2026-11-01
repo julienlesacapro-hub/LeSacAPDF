@@ -1,4 +1,4 @@
-# Le Sac à PDF
+# LeSacAPDF
 
 <img src="www/icons/icon-512.png" width="96" align="right" alt="Logo : un sac en cuir d'où sort un fichier PDF">
 
@@ -51,6 +51,10 @@ npm run icons                                         # régénère les icônes 
 
 À chaque nouvelle version, augmentez aussi `VERSION` dans `www/sw.js` : l'ancien cache
 est alors purgé proprement.
+
+## Propriété
+
+© LESACA Julien — Tous droits réservés. Voir [LICENSE](LICENSE).
 
 Bibliothèques incluses : [pdf.js 3.11.174](https://github.com/mozilla/pdf.js) (Apache 2.0,
 variante *legacy* pour les iPhone plus anciens) et [pdf-lib 1.17.1](https://github.com/Hopding/pdf-lib)

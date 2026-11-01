@@ -1,0 +1,11 @@
+LeSacAPDF
+Copyright © LESACA Julien — Tous droits réservés.
+
+Ce logiciel, son code source, son interface et son logo sont la propriété
+exclusive de LESACA Julien. Toute reproduction, modification, distribution
+ou utilisation, totale ou partielle, sans autorisation écrite préalable de
+l'auteur est interdite.
+
+Exception : les bibliothèques tierces incluses dans www/vendor/ restent
+soumises à leur propre licence (pdf.js : Apache 2.0, pdf-lib : MIT), dont
+le texte figure dans ce même dossier.

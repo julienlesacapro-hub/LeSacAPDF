@@ -1,5 +1,6 @@
 /* =========================================================================
-   Le Sac à PDF — feuille de style (mobile d'abord, s'adapte à la tablette
+   LeSacAPDF — © LESACA Julien — Tous droits réservés
+   Feuille de style (mobile d'abord, s'adapte à la tablette
    et à l'ordinateur).
    ========================================================================= */
 :root {
@@ -127,6 +128,7 @@ body.placing .layer, body.drawing .layer { cursor: crosshair; }
 .perks li { display: flex; align-items: center; gap: 10px; }
 .perks svg { width: 20px; height: 20px; color: var(--caramel); }
 .link { margin-top: 18px; display: inline-flex; gap: 8px; align-items: center; color: var(--sel); font-weight: 600; }
+.owner { margin: 22px 0 0; font-size: 12px; color: var(--muted); }
 .viewer.drag { outline: 3px dashed var(--sel); outline-offset: -12px; }
 
 /* ----------------------------------------------------------- annotations */
