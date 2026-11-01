@@ -1,6 +1,6 @@
 # Le Sac à PDF
 
-<img src="www/icons/icon-512.png" width="96" align="right" alt="Logo : un sac d'où sort un fichier PDF">
+<img src="www/icons/icon-512.png" width="96" align="right" alt="Logo : un sac en cuir d'où sort un fichier PDF">
 
 Application web installable (**PWA**) pour **Android et iPhone** : remplir, annoter et signer des PDF.
 Version mobile de `EditeurPDF.html` : mêmes fonctions, interface pensée pour le doigt.
@@ -46,7 +46,7 @@ séparés de ceux de Safari. Utilisez *Menu → Sauvegarder / restaurer* pour le
 ```bash
 npm run serve                                         # http://localhost:8080
 node tools/e2e-test.js fichier.pdf captures/ android   # test complet sur téléphone émulé (ou: iphone)
-node tools/make-icons.js                              # régénère les icônes depuis www/icons/logo.svg
+npm run icons                                         # régénère les icônes depuis design/sac-source.jpg
 ```
 
 À chaque nouvelle version, augmentez aussi `VERSION` dans `www/sw.js` : l'ancien cache

@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.2.0";
 pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js";
 
 /* ---------------------------------------------------------------- outils */

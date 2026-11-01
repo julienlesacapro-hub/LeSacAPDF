@@ -1,11 +1,11 @@
 {
   "name": "le-sac-a-pdf",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Le Sac à PDF — application web installable (PWA) pour remplir, annoter et signer des PDF sur Android et iPhone (100 % local).",
   "scripts": {
     "serve": "node tools/serve.js 8080",
-    "icons": "node tools/make-icons.js",
+    "icons": "python3 tools/fill-corners.py && node tools/make-icons.js",
     "test": "node tools/e2e-test.js"
   }
 }
