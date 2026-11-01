@@ -2,9 +2,28 @@
 
 <img src="www/icons/icon-512.png" width="96" align="right" alt="Logo : un sac d'où sort un fichier PDF">
 
-Application pour **Android et iPhone** qui permet de remplir, annoter et signer des PDF.
+Application web installable (**PWA**) pour **Android et iPhone** : remplir, annoter et signer des PDF.
 Version mobile de `EditeurPDF.html` : mêmes fonctions, interface pensée pour le doigt.
-**Tout reste sur le téléphone** : aucun fichier n'est envoyé sur Internet.
+**Tout reste sur le téléphone** : aucun fichier n'est envoyé sur Internet, et l'application
+fonctionne sans connexion une fois installée.
+
+## Installer sur le téléphone
+
+Adresse (après publication, voir plus bas) : `https://julienlesacapro-hub.github.io/LeSacAPDF/`
+
+- **iPhone / iPad** : ouvrir l'adresse dans **Safari** → bouton **Partager** → **Sur l'écran d'accueil** → **Ajouter**.
+- **Android** : ouvrir l'adresse dans **Chrome** → menu **⋮** → **Installer l'application**
+  (ou le bandeau « Installer » proposé automatiquement). Une fois installée, elle apparaît
+  dans le menu **Partager** des autres applications pour recevoir un PDF.
+- **Ordinateur** (Chrome, Edge) : icône d'installation dans la barre d'adresse.
+
+Les mises à jour sont automatiques : après une publication, la nouvelle version est
+téléchargée en arrière-plan et s'affiche à l'ouverture suivante de l'application.
+
+## Publier (GitHub Pages, gratuit pour ce dépôt public)
+
+Le workflow `.github/workflows/pages.yml` publie le dossier `www/` à chaque envoi sur `main`.
+Une seule fois : *Settings → Pages → Build and deployment → Source : **GitHub Actions***.
 
 ## Fonctions
 
@@ -17,52 +36,22 @@ Version mobile de `EditeurPDF.html` : mêmes fonctions, interface pensée pour l
 | Date, heure, image, textes enregistrés (en-tête, adresse, RPPS…) | insertion en un geste |
 | Utilisateurs | plusieurs profils avec leurs signatures et textes ; sauvegarde / restauration (compatible avec la version ordinateur) |
 | Enregistrer | qualité d'origine ou fichier allégé sous une taille maximale (Mo), puis **Partager** (mail, messagerie, « Enregistrer dans Fichiers ») |
-| Confort mobile | pincer pour zoomer, annuler/rétablir, aperçu des pages, mode sombre, fonctionne hors connexion |
+| Confort mobile | pincer pour zoomer, annuler/rétablir, aperçu des pages, mode sombre, hors connexion |
 
-## Trois façons de l'installer
-
-### 1. Application web installable (PWA) — la plus simple, gratuite
-Le dossier `www/` est une application complète. Une fois publiée en HTTPS
-(par exemple avec GitHub Pages, workflow `.github/workflows/pages.yml` déjà prêt) :
-
-- **iPhone** : ouvrir l'adresse dans Safari → bouton Partager → « Sur l'écran d'accueil ».
-- **Android** : ouvrir l'adresse dans Chrome → menu ⋮ → « Installer l'application ».
-  Elle apparaît ensuite dans le menu « Partager » des autres applications pour recevoir un PDF.
-
-Pour activer GitHub Pages : *Settings → Pages → Source : GitHub Actions*, puis fusionner sur `main`.
-(Sur un dépôt privé, GitHub Pages demande un abonnement payant.)
-
-### 2. APK Android (installation directe)
-À chaque envoi sur GitHub, le workflow « APK Android » fabrique `app-debug.apk`
-(onglet *Actions* → dernière exécution → *Artifacts*). Sur le téléphone, autorisez
-« installer des applications inconnues » puis ouvrez le fichier.
-C'est une version de test, signée avec une clé de débogage : pour le Play Store, il faut
-la signer avec votre propre clé (Android Studio → *Build → Generate Signed Bundle*).
-
-### 3. Applications natives (Play Store / App Store) avec Capacitor
-Les projets natifs sont dans `android/` et `ios/`.
-
-```bash
-npm install
-npx cap sync           # copie www/ dans les projets natifs
-npx cap open android   # Android Studio
-npx cap open ios       # Xcode (Mac obligatoire)
-```
-
-iOS nécessite un Mac avec Xcode et CocoaPods (`cd ios/App && pod install`), ainsi
-qu'un compte Apple Developer (99 $/an) pour installer sur un iPhone hors simulateur ou publier.
-Le Play Store demande un compte Google Play Console (25 $ une fois).
+Bon à savoir : sur iPhone, les signatures et textes enregistrés de l'application installée sont
+séparés de ceux de Safari. Utilisez *Menu → Sauvegarder / restaurer* pour les transférer.
 
 ## Développement
 
 ```bash
-npm run serve                              # http://localhost:8080
-node tools/e2e-test.js fichier.pdf captures/ android   # test complet sur téléphone émulé
-node tools/make-icons.js                   # régénère les icônes depuis www/icons/logo.svg
-npx capacitor-assets generate              # régénère les icônes natives depuis assets/
+npm run serve                                         # http://localhost:8080
+node tools/e2e-test.js fichier.pdf captures/ android   # test complet sur téléphone émulé (ou: iphone)
+node tools/make-icons.js                              # régénère les icônes depuis www/icons/logo.svg
 ```
 
-Bibliothèques incluses (identiques octet pour octet à celles de `EditeurPDF.html`, sauf pdf.js
-qui passe à la variante *legacy* pour les iPhone plus anciens) :
-[pdf.js 3.11.174](https://github.com/mozilla/pdf.js) (Apache 2.0) et
-[pdf-lib 1.17.1](https://github.com/Hopding/pdf-lib) (MIT) — licences dans `www/vendor/`.
+À chaque nouvelle version, augmentez aussi `VERSION` dans `www/sw.js` : l'ancien cache
+est alors purgé proprement.
+
+Bibliothèques incluses : [pdf.js 3.11.174](https://github.com/mozilla/pdf.js) (Apache 2.0,
+variante *legacy* pour les iPhone plus anciens) et [pdf-lib 1.17.1](https://github.com/Hopding/pdf-lib)
+(MIT), mêmes versions que dans `EditeurPDF.html` — licences dans `www/vendor/`.

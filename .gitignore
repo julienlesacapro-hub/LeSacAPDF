@@ -1,8 +1,3 @@
 node_modules/
 *.log
 .DS_Store
-android/app/build/
-android/.gradle/
-android/build/
-ios/App/Pods/
-ios/App/build/

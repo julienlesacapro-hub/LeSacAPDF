@@ -1,9 +1,9 @@
 /* Le Sac à PDF — service worker : fonctionnement hors ligne + réception des
    PDF partagés depuis d'autres applications (Android). */
-const VERSION = "sac-a-pdf-v1.0.0";
+const VERSION = "sac-a-pdf-v1.1.0";
 const FILES = [
   "./", "index.html", "css/app.css", "js/app.js", "manifest.webmanifest",
-  "vendor/capacitor.js", "vendor/pdf.min.js", "vendor/pdf.worker.min.js", "vendor/pdf-lib.min.js",
+  "vendor/pdf.min.js", "vendor/pdf.worker.min.js", "vendor/pdf-lib.min.js",
   "icons/logo.svg", "icons/icon-192.png", "icons/icon-512.png",
   "icons/maskable-192.png", "icons/maskable-512.png", "icons/apple-touch-icon.png", "icons/favicon-32.png"
 ];

@@ -1,26 +1,11 @@
 {
   "name": "le-sac-a-pdf",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "Le Sac à PDF — remplir, annoter et signer des PDF sur Android et iPhone (100 % local).",
+  "description": "Le Sac à PDF — application web installable (PWA) pour remplir, annoter et signer des PDF sur Android et iPhone (100 % local).",
   "scripts": {
     "serve": "node tools/serve.js 8080",
     "icons": "node tools/make-icons.js",
-    "test": "node tools/e2e-test.js",
-    "sync": "npx cap sync",
-    "android": "npx cap open android",
-    "ios": "npx cap open ios"
-  },
-  "dependencies": {
-    "@capacitor/android": "^7.0.0",
-    "@capacitor/app": "^7.1.2",
-    "@capacitor/core": "^7.0.0",
-    "@capacitor/filesystem": "^7.0.0",
-    "@capacitor/ios": "^7.0.0",
-    "@capacitor/share": "^7.0.0"
-  },
-  "devDependencies": {
-    "@capacitor/assets": "^3.0.5",
-    "@capacitor/cli": "^7.0.0"
+    "test": "node tools/e2e-test.js"
   }
 }
