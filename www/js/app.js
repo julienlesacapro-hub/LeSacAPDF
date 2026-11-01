@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.2.0";
 pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js";
 
 /* ---------------------------------------------------------------- outils */
@@ -16,7 +16,6 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const icon = (id, cls) => '<svg' + (cls ? ' class="' + cls + '"' : "") + '><use href="#i-' + id + '"/></svg>';
-const isNative = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
               (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const isStandalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
@@ -185,7 +184,7 @@ let curSheet = null;
 function openSheet(id) {
   const el = $("#" + id);
   if (curSheet && curSheet !== el) curSheet.classList.remove("on");
-  else if (!curSheet && !isNative()) { try { history.pushState({ sheet: 1 }, ""); } catch (e) {} }
+  else if (!curSheet) { try { history.pushState({ sheet: 1 }, ""); } catch (e) {} }
   curSheet = el;
   el.classList.add("on");
   el.scrollTop = 0;
@@ -1629,11 +1628,6 @@ async function buildSmall(targetBytes, gray) {
 }
 
 /* ------------------------------------------------ partage / enregistrement */
-function bytesToB64(bytes) {
-  let s = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-  return btoa(s);
-}
 function download(blob, name) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -1641,20 +1635,9 @@ function download(blob, name) {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 30000);
 }
-/* application native (Capacitor) : fichier temporaire + feuille de partage */
-async function nativeShare(blob, name) {
-  const C = window.Capacitor, reg = window.capacitorExports && window.capacitorExports.registerPlugin;
-  const get = n => (C.Plugins && C.Plugins[n]) || (reg ? reg(n) : null);
-  const Filesystem = get("Filesystem"), Share = get("Share");
-  if (!Filesystem || !Share) throw new Error("modules natifs absents");
-  const data = bytesToB64(new Uint8Array(await blob.arrayBuffer()));
-  const w = await Filesystem.writeFile({ path: name, data, directory: "CACHE" });
-  await Share.share({ title: name, files: [w.uri], dialogTitle: "Partager " + name });
-}
 /* doit être appelé directement depuis un appui (exigence de Safari) */
 async function shareOrSave(blob, name, type) {
   try {
-    if (isNative()) { await nativeShare(blob, name); return "shared"; }
     const file = new File([blob], name, { type: type || blob.type });
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       await navigator.share({ files: [file], title: name });
@@ -1731,7 +1714,7 @@ function ask(title, sub, value) {
 /* --------------------------------------------------- installation (PWA) */
 let installEvt = null;
 function initInstall() {
-  const can = () => !isNative() && !isStandalone();
+  const can = () => !isStandalone();
   window.addEventListener("beforeinstallprompt", e => {
     e.preventDefault(); installEvt = e;
     $("#btnInstallHint").hidden = !can();
@@ -1949,7 +1932,6 @@ function init() {
       $("#doneName").textContent = nm;
       $("#doneInfo").textContent = "PDF prêt · " + fmtMo(r.bytes.length) + (r.note ? " · " + r.note : "");
       $("#saveForm").hidden = true; $("#saveDone").hidden = false;
-      $("#doneDl").hidden = isNative();
       $("#shSave").scrollTop = 0;
     } catch (e) {
       console.error(e);
@@ -2055,29 +2037,15 @@ function init() {
   });
 
   window.addEventListener("beforeunload", e => {
-    if (S.items.length && !isNative()) { e.preventDefault(); e.returnValue = ""; }
+    if (S.items.length) { e.preventDefault(); e.returnValue = ""; }
   });
 
   /* stockage persistant (évite l'effacement automatique des signatures) */
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 
   receiveShared();
-  initNativeBack();
 }
 
-/* application native Android : bouton « retour » du téléphone */
-function initNativeBack() {
-  if (!isNative() || !window.capacitorExports) return;
-  try {
-    const App = window.capacitorExports.registerPlugin("App");
-    App.addListener("backButton", () => {
-      if (curSheet) hideSheet();
-      else if (S.pending || S.tool !== "select") setTool("select");
-      else if (S.sel) select(null);
-      else App.exitApp();
-    });
-  } catch (e) { console.warn(e); }
-}
 
 function updatePill() {
   if (!S.pages.length) return;
@@ -2090,8 +2058,8 @@ function updatePill() {
   $("#pageNum").textContent = (S.cur + 1) + " / " + S.pages.length;
 }
 
-/* mode hors ligne (pas dans l'application native : fichiers déjà locaux) */
-if ("serviceWorker" in navigator && !isNative() && /^https?:$/.test(location.protocol)) {
+/* mode hors ligne */
+if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("sw.js").catch(e => console.warn("service worker :", e));
   });

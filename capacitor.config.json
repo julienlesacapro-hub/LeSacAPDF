@@ -1,8 +1,0 @@
-{
-  "appId": "fr.lesacapdf.app",
-  "appName": "Le Sac à PDF",
-  "webDir": "www",
-  "backgroundColor": "#EEF1F5",
-  "android": { "allowMixedContent": false },
-  "ios": { "contentInset": "never", "scrollEnabled": false }
-}

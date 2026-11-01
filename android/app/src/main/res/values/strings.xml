@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">Le Sac à PDF</string>
-    <string name="title_activity_main">Le Sac à PDF</string>
-    <string name="package_name">fr.lesacapdf.app</string>
-    <string name="custom_url_scheme">fr.lesacapdf.app</string>
-</resources>
