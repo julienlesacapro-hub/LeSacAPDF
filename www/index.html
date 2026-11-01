@@ -3,14 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<title>Le Sac à PDF</title>
+<title>LeSacAPDF</title>
+<meta name="author" content="LESACA Julien">
+<meta name="copyright" content="© LESACA Julien — Tous droits réservés">
 <meta name="description" content="Remplir, annoter et signer vos PDF sur votre téléphone. Tout reste sur l'appareil.">
 <meta name="theme-color" content="#1B3558">
 <meta name="color-scheme" content="light dark">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Sac à PDF">
+<meta name="apple-mobile-web-app-title" content="LeSacAPDF">
 <meta name="format-detection" content="telephone=no">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
@@ -63,11 +65,11 @@
 
   <!-- ====================================================== barre du haut -->
   <header class="appbar">
-    <button class="logo-btn" id="btnHome" aria-label="Le Sac à PDF">
+    <button class="logo-btn" id="btnHome" aria-label="LeSacAPDF">
       <img src="icons/icon-192.png" alt="" width="34" height="34">
     </button>
     <div class="title">
-      <div class="t1" id="docTitle">Le Sac à PDF</div>
+      <div class="t1" id="docTitle">LeSacAPDF</div>
       <div class="t2" id="docSub">Remplir · annoter · signer</div>
     </div>
     <button class="ib" id="btnUndo" aria-label="Annuler" disabled><svg><use href="#i-undo"/></svg></button>
@@ -80,7 +82,7 @@
   <main class="viewer" id="viewer">
     <section class="empty" id="empty">
       <img class="hero" src="icons/icon-512.png" alt="" width="132" height="132">
-      <h1>Le Sac à PDF</h1>
+      <h1>LeSacAPDF</h1>
       <p>Remplissez, annotez et signez vos documents<br>directement sur votre téléphone.</p>
       <button class="big-cta" id="btnOpen2"><svg><use href="#i-open"/></svg>Ouvrir un PDF</button>
       <ul class="perks">
@@ -89,6 +91,7 @@
         <li><svg><use href="#i-share"/></svg>Envoi direct par mail, messagerie ou Fichiers</li>
       </ul>
       <button class="link" id="btnInstallHint" hidden><svg><use href="#i-install"/></svg>Installer l'application</button>
+      <p class="owner">© LESACA Julien — Tous droits réservés</p>
     </section>
     <div id="pages"></div>
   </main>
@@ -284,7 +287,7 @@
 <!-- installation -->
 <section class="sheet" id="shInstall" aria-label="Installer">
   <div class="grab"></div>
-  <h2>Installer Le Sac à PDF</h2>
+  <h2>Installer LeSacAPDF</h2>
   <div id="instBody"></div>
   <div class="actions"><button class="primary" data-close>Compris</button></div>
 </section>
@@ -304,7 +307,7 @@
     <dt>Envoyer</dt><dd><b>Partager</b> en haut à droite : mail, messagerie, « Enregistrer dans Fichiers »…</dd>
     <dt>Confidentialité</dt><dd>Aucun fichier n'est envoyé sur Internet : tout est calculé sur l'appareil.</dd>
   </dl>
-  <p class="sub center">Le Sac à PDF · <span id="appVer"></span></p>
+  <p class="sub center">LeSacAPDF · <span id="appVer"></span><br>© LESACA Julien — Tous droits réservés</p>
 </section>
 
 <!-- question simple -->

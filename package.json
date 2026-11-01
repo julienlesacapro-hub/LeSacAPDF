@@ -1,8 +1,10 @@
 {
-  "name": "le-sac-a-pdf",
-  "version": "1.2.0",
+  "name": "lesacapdf",
+  "version": "1.3.0",
+  "author": "LESACA Julien",
+  "license": "UNLICENSED",
   "private": true,
-  "description": "Le Sac à PDF — application web installable (PWA) pour remplir, annoter et signer des PDF sur Android et iPhone (100 % local).",
+  "description": "LeSacAPDF — application web installable (PWA) pour remplir, annoter et signer des PDF sur Android et iPhone (100 % local).",
   "scripts": {
     "serve": "node tools/serve.js 8080",
     "icons": "python3 tools/fill-corners.py && node tools/make-icons.js",

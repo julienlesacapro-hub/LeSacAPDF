@@ -1,7 +1,7 @@
 {
-  "name": "Le Sac à PDF",
-  "short_name": "Sac à PDF",
-  "description": "Remplir, annoter et signer vos PDF sur votre téléphone. Tout reste sur l'appareil.",
+  "name": "LeSacAPDF",
+  "short_name": "LeSacAPDF",
+  "description": "Remplir, annoter et signer vos PDF sur votre téléphone. Tout reste sur l'appareil. © LESACA Julien — Tous droits réservés.",
   "id": "./",
   "start_url": "./",
   "scope": "./",

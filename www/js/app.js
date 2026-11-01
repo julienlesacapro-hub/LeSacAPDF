@@ -1,12 +1,13 @@
 /* =========================================================================
-   Le Sac à PDF — remplissage de formulaires, texte, images et signatures.
+   LeSacAPDF — remplissage de formulaires, texte, images et signatures.
    Version mobile (Android / iPhone) de l'éditeur PDF.
    100 % local : aucun fichier ne quitte l'appareil.
+   © LESACA Julien — Tous droits réservés.
    ========================================================================= */
 (function () {
 "use strict";
 
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.3.0";
 pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js";
 
 /* ---------------------------------------------------------------- outils */
@@ -133,7 +134,7 @@ const Prof = {
       data.data[p.id] = { sigs: store.get("sigs." + p.id, []), snips: store.get("snips." + p.id, []),
                           pref: store.get("pref." + p.id, {}) };
     }
-    const name = "sac-a-pdf-sauvegarde-" + new Date().toISOString().slice(0, 10) + ".json";
+    const name = "lesacapdf-sauvegarde-" + new Date().toISOString().slice(0, 10) + ".json";
     shareOrSave(new Blob([JSON.stringify(data)], { type: "application/json" }), name, "application/json");
   },
 
@@ -259,7 +260,7 @@ async function openFile(file) {
     updateSub();
     updatePill();
     updateUndo();
-    document.title = S.name + " — Le Sac à PDF";
+    document.title = S.name + " — LeSacAPDF";
     $("#viewer").scrollTo(0, 0);
   } catch (e) {
     console.error(e);
@@ -1734,7 +1735,7 @@ function initInstall() {
       ? '<ol class="steps"><li>Ouvrez cette page dans <b>Safari</b>.</li>' +
         "<li>Touchez le bouton <b>Partager</b> " + icon("share") + " en bas de l'écran.</li>" +
         "<li>Choisissez <b>Sur l'écran d'accueil</b>, puis <b>Ajouter</b>.</li></ol>" +
-        '<p class="sub" style="margin-top:12px">L\'icône du Sac à PDF apparaîtra avec vos autres applications ; elle fonctionne même sans connexion.</p>'
+        '<p class="sub" style="margin-top:12px">L\'icône de LeSacAPDF apparaîtra avec vos autres applications ; elle fonctionne même sans connexion.</p>'
       : '<ol class="steps"><li>Ouvrez le menu du navigateur <b>⋮</b> (Chrome, Edge, Samsung Internet…).</li>' +
         "<li>Choisissez <b>Installer l'application</b> ou <b>Ajouter à l'écran d'accueil</b>.</li></ol>" +
         '<p class="sub" style="margin-top:12px">Une fois installée, l\'application fonctionne sans connexion et apparaît dans « Ouvrir avec » / « Partager » pour vos PDF.</p>';
