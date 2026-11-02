@@ -1,7 +1,7 @@
-/* LeSacAPDF — © LESACA Julien — Tous droits réservés
+/* LeSacAPDF — © 2026 LESACA Julien — Tous droits réservés
    Service worker : fonctionnement hors ligne + réception des
    PDF partagés depuis d'autres applications (Android). */
-const VERSION = "lesacapdf-v1.3.0";
+const VERSION = "lesacapdf-v3.1.0";
 const FILES = [
   "./", "index.html", "css/app.css", "js/app.js", "manifest.webmanifest",
   "vendor/pdf.min.js", "vendor/pdf.worker.min.js", "vendor/pdf-lib.min.js",

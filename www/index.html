@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>LeSacAPDF</title>
 <meta name="author" content="LESACA Julien">
-<meta name="copyright" content="© LESACA Julien — Tous droits réservés">
+<meta name="copyright" content="© 2026 LESACA Julien — Tous droits réservés">
 <meta name="description" content="Remplir, annoter et signer vos PDF sur votre téléphone. Tout reste sur l'appareil.">
 <meta name="theme-color" content="#1B3558">
 <meta name="color-scheme" content="light dark">
@@ -58,6 +58,21 @@
     <symbol id="i-install" viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M12 7v7M9 11l3 3 3-3"/></symbol>
     <symbol id="i-backup" viewBox="0 0 24 24"><path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></symbol>
     <symbol id="i-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="m7.5 12.5 3 3 6-6.5"/></symbol>
+    <symbol id="i-print" viewBox="0 0 24 24"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+    <symbol id="i-stamp" viewBox="0 0 24 24"><path d="M9.5 3.5h5l-1 7h4a2 2 0 0 1 2 2v3H4.5v-3a2 2 0 0 1 2-2h4z"/><path d="M5 19.5h14"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8a2 2 0 0 1 2-2h2l1.5-2h5L16 6h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.5"/></symbol>
+    <symbol id="i-merge" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="11" rx="1.5"/><rect x="13" y="3" width="8" height="11" rx="1.5"/><path d="M7 14v3h10v-3M12 17v4"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4h4"/><path d="M12 8v4l3 2"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-drag" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.4" fill="currentColor"/><circle cx="15" cy="6" r="1.4" fill="currentColor"/><circle cx="9" cy="12" r="1.4" fill="currentColor"/><circle cx="15" cy="12" r="1.4" fill="currentColor"/><circle cx="9" cy="18" r="1.4" fill="currentColor"/><circle cx="15" cy="18" r="1.4" fill="currentColor"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
+    <symbol id="i-dn" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-split" viewBox="0 0 24 24"><rect x="4" y="3" width="10" height="13" rx="1.5"/><path d="M10 21h8a2 2 0 0 0 2-2V9"/><path d="m14 12 4 4M18 12l-4 4" opacity=".0"/></symbol>
+    <symbol id="i-check2" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="m8 12.5 3 3 5-6"/></symbol>
   </defs>
 </svg>
 
@@ -72,11 +87,22 @@
       <div class="t1" id="docTitle">LeSacAPDF</div>
       <div class="t2" id="docSub">Remplir · annoter · signer</div>
     </div>
+    <button class="ib" id="btnSearch" aria-label="Rechercher"><svg><use href="#i-search"/></svg></button>
     <button class="ib" id="btnUndo" aria-label="Annuler" disabled><svg><use href="#i-undo"/></svg></button>
     <button class="ib" id="btnRedo" aria-label="Rétablir" disabled><svg><use href="#i-redo"/></svg></button>
     <button class="cta" id="btnSave" disabled><svg><use href="#i-share"/></svg><span>Partager</span></button>
     <button class="ib" id="btnMenu" aria-label="Menu"><svg><use href="#i-more"/></svg></button>
   </header>
+
+  <!-- recherche -->
+  <div class="searchbar" id="searchBar" hidden>
+    <svg><use href="#i-search"/></svg>
+    <input type="search" id="searchInput" placeholder="Rechercher dans le document" enterkeyhint="search" autocomplete="off">
+    <span id="searchCount"></span>
+    <button class="ib" id="searchPrev" aria-label="Précédent"><svg><use href="#i-up"/></svg></button>
+    <button class="ib" id="searchNext" aria-label="Suivant"><svg><use href="#i-dn"/></svg></button>
+    <button class="ib" id="searchClose" aria-label="Fermer"><svg><use href="#i-close"/></svg></button>
+  </div>
 
   <!-- ========================================================= document -->
   <main class="viewer" id="viewer">
@@ -85,13 +111,21 @@
       <h1>LeSacAPDF</h1>
       <p>Remplissez, annotez et signez vos documents<br>directement sur votre téléphone.</p>
       <button class="big-cta" id="btnOpen2"><svg><use href="#i-open"/></svg>Ouvrir un PDF</button>
+      <div class="home-actions">
+        <button id="btnScanHome"><svg><use href="#i-camera"/></svg>Scanner</button>
+        <button id="btnMergeHome"><svg><use href="#i-merge"/></svg>Fusionner</button>
+      </div>
+      <section class="recents" id="recentsHome" hidden>
+        <h3>Documents récents</h3>
+        <div class="chips" id="recentList"></div>
+      </section>
       <ul class="perks">
         <li><svg><use href="#i-lock"/></svg>Vos fichiers ne quittent jamais l'appareil</li>
         <li><svg><use href="#i-sign"/></svg>Signature enregistrée, réutilisable en un geste</li>
         <li><svg><use href="#i-share"/></svg>Envoi direct par mail, messagerie ou Fichiers</li>
       </ul>
       <button class="link" id="btnInstallHint" hidden><svg><use href="#i-install"/></svg>Installer l'application</button>
-      <p class="owner">© LESACA Julien — Tous droits réservés</p>
+      <p class="owner">© 2026 LESACA Julien — Tous droits réservés</p>
     </section>
     <div id="pages"></div>
   </main>
@@ -113,6 +147,7 @@
       <button class="tool on" data-tool="select"><svg><use href="#i-hand"/></svg><span>Déplacer</span></button>
       <button class="tool" data-tool="text"><svg><use href="#i-text"/></svg><span>Texte</span></button>
       <button class="tool" data-act="sign"><svg><use href="#i-sign"/></svg><span>Signer</span></button>
+      <button class="tool" data-act="stamp"><svg><use href="#i-stamp"/></svg><span>Tampon</span></button>
       <button class="tool" data-tool="check"><svg><use href="#i-check"/></svg><span>Coche</span></button>
       <button class="tool" data-tool="cross"><svg><use href="#i-cross"/></svg><span>Croix</span></button>
       <button class="tool" data-act="date"><svg><use href="#i-date"/></svg><span>Date</span></button>
@@ -134,8 +169,18 @@
   <div class="grab"></div>
   <div class="menu">
     <button data-m="open"><svg><use href="#i-open"/></svg>Ouvrir un autre PDF</button>
+    <button data-m="recents"><svg><use href="#i-history"/></svg>Documents récents</button>
+    <button data-m="scan"><svg><use href="#i-camera"/></svg>Scanner un document</button>
+    <hr>
+    <button data-m="organize" class="needdoc"><svg><use href="#i-grid"/></svg>Organiser les pages <small>supprimer, déplacer, pivoter…</small></button>
+    <button data-m="split" class="needdoc"><svg><use href="#i-split"/></svg>Scinder <small>extraire des pages</small></button>
+    <button data-m="merge"><svg><use href="#i-merge"/></svg>Fusionner des PDF</button>
+    <button data-m="search" class="needdoc"><svg><use href="#i-search"/></svg>Rechercher dans le document</button>
+    <button data-m="print" class="needdoc"><svg><use href="#i-print"/></svg>Imprimer</button>
+    <hr>
     <button data-m="pages" class="needdoc"><svg><use href="#i-pages"/></svg>Aperçu des pages</button>
     <button data-m="rotate" class="needdoc"><svg><use href="#i-rotate"/></svg>Pivoter la page affichée</button>
+    <button data-m="redo" class="needdoc"><svg><use href="#i-redo"/></svg>Rétablir</button>
     <button data-m="fit" class="needdoc"><svg><use href="#i-fit"/></svg>Ajuster à la largeur</button>
     <button data-m="time" class="needdoc"><svg><use href="#i-clock"/></svg>Insérer l'heure</button>
     <button data-m="datetime" class="needdoc"><svg><use href="#i-date"/></svg>Insérer la date et l'heure</button>
@@ -280,6 +325,7 @@
     <p class="sub center" id="doneInfo"></p>
     <button class="primary wide" id="doneShare"><svg><use href="#i-share"/></svg>Partager ou enregistrer</button>
     <button class="ghost wide" id="doneDl"><svg><use href="#i-down"/></svg>Télécharger</button>
+    <button class="ghost wide" id="doneOpen" hidden><svg><use href="#i-open"/></svg>Ouvrir dans l'éditeur</button>
     <button class="ghost wide" id="doneClose">Revenir au document</button>
   </div>
 </section>
@@ -303,11 +349,52 @@
     <dt>Déplacer, agrandir</dt><dd>Faites glisser un élément ; tirez la poignée ronde pour le redimensionner.
       La barre qui apparaît permet de changer couleur et taille, dupliquer ou supprimer.</dd>
     <dt>Modifier un texte</dt><dd>Touchez-le deux fois, ou bouton <b>Modifier</b>.</dd>
+    <dt>Tampons</dt><dd>Outil <b>Tampon</b> : « Lu et approuvé », « Bon pour accord », « Copie conforme »…, datés
+      automatiquement si vous le souhaitez. Vous pouvez créer vos propres tampons.</dd>
+    <dt>Rechercher</dt><dd>Loupe en haut de l'écran : les résultats sont surlignés, flèches pour passer de l'un à l'autre.</dd>
+    <dt>Organiser, scinder, fusionner</dt><dd>Menu ⋮ : touchez les pages pour les sélectionner (le numéro bleu donne leur
+      ordre), faites glisser ⠿ pour les déplacer, l'œil pour les voir en grand. Supprimer, pivoter, dupliquer,
+      extraire en un nouveau PDF, ou ajouter les pages d'autres PDF.</dd>
+    <dt>Scanner</dt><dd>Photographiez une feuille : ses bords sont détectés, la page est redressée et le fond blanchi.
+      Ajoutez autant de pages que nécessaire.</dd>
+    <dt>Imprimer</dt><dd>Menu ⋮ → Imprimer : la fenêtre d'impression du téléphone s'ouvre (AirPrint, Mopria…).</dd>
+    <dt>Documents récents</dt><dd>Les 10 derniers PDF ouverts ou créés restent sur l'accueil, conservés sur l'appareil.</dd>
     <dt>Zoomer</dt><dd>Écartez deux doigts sur le document.</dd>
     <dt>Envoyer</dt><dd><b>Partager</b> en haut à droite : mail, messagerie, « Enregistrer dans Fichiers »…</dd>
     <dt>Confidentialité</dt><dd>Aucun fichier n'est envoyé sur Internet : tout est calculé sur l'appareil.</dd>
   </dl>
-  <p class="sub center">LeSacAPDF · <span id="appVer"></span><br>© LESACA Julien — Tous droits réservés</p>
+  <p class="sub center">LeSacAPDF · <span id="appVer"></span><br>© 2026 LESACA Julien — Tous droits réservés</p>
+</section>
+
+<!-- tampons -->
+<section class="sheet tall" id="shStamps" aria-label="Tampons">
+  <div class="grab"></div>
+  <h2>Tampons</h2>
+  <p class="sub">Touchez un tampon, puis l'endroit du document où le poser.</p>
+  <div class="row stamp-opts">
+    <label class="chk" style="margin:0"><input type="checkbox" id="stampDate" checked> Ajouter la date</label>
+    <div class="swatches" id="stampColors"></div>
+  </div>
+  <div class="stamps" id="stampList"></div>
+  <button class="wide" id="btnNewStamp"><svg><use href="#i-plus"/></svg>Créer un tampon</button>
+</section>
+
+<!-- source du scan -->
+<section class="sheet" id="shScanSrc" aria-label="Scanner">
+  <div class="grab"></div>
+  <h2>Scanner un document</h2>
+  <p class="sub">Posez la feuille à plat, bien éclairée, sur un fond contrasté. Vous pourrez ensuite recadrer
+    et améliorer l'image, puis ajouter d'autres pages.</p>
+  <button class="primary wide" id="scCam"><svg><use href="#i-camera"/></svg>Prendre une photo</button>
+  <button class="wide" id="scGal"><svg><use href="#i-image"/></svg>Choisir dans la galerie</button>
+</section>
+
+<!-- documents récents -->
+<section class="sheet tall" id="shRecents" aria-label="Documents récents">
+  <div class="grab"></div>
+  <h2>Documents récents</h2>
+  <p class="sub">Conservés sur cet appareil uniquement (10 derniers).</p>
+  <div class="chips" id="recentList2"></div>
 </section>
 
 <!-- question simple -->
@@ -322,7 +409,77 @@
   </div>
 </section>
 
+<!-- ============================================================ panneaux plein écran -->
+<!-- organiser / scinder / fusionner -->
+<section class="panel" id="pnOrg" aria-label="Pages">
+  <header class="pbar">
+    <button class="ib" data-pclose aria-label="Fermer"><svg><use href="#i-close"/></svg></button>
+    <div class="ptitle"><b id="orgTitle">Organiser les pages</b><small id="orgSub"></small></div>
+    <button class="ib" id="orgAll" aria-label="Tout sélectionner"><svg><use href="#i-check2"/></svg></button>
+    <button class="pill" id="orgAdd"><svg><use href="#i-plus"/></svg>PDF</button>
+  </header>
+  <p class="phint" id="orgHint"></p>
+  <div class="orggrid" id="orgGrid"></div>
+  <footer class="pfoot" id="orgFoot"></footer>
+</section>
+
+<!-- aperçu d'une page en grand -->
+<section class="panel dark" id="pnPreview" aria-label="Aperçu">
+  <header class="pbar">
+    <button class="ib" data-pclose aria-label="Fermer"><svg><use href="#i-close"/></svg></button>
+    <div class="ptitle"><b id="pvTitle"></b><small id="pvSub"></small></div>
+  </header>
+  <div class="pvbody" id="pvBody"><canvas id="pvCanvas"></canvas></div>
+  <footer class="pfoot">
+    <button class="ghost" id="pvPrev"><svg><use href="#i-left"/></svg></button>
+    <button class="primary grow" id="pvSel">Sélectionner</button>
+    <button class="ghost" id="pvNext"><svg><use href="#i-right"/></svg></button>
+  </footer>
+</section>
+
+<!-- scanner -->
+<section class="panel dark" id="pnScan" aria-label="Scanner">
+  <header class="pbar">
+    <button class="ib" data-pclose aria-label="Fermer"><svg><use href="#i-close"/></svg></button>
+    <div class="ptitle"><b id="scTitle">Scanner</b><small id="scSub"></small></div>
+    <button class="ib" id="scRot" aria-label="Pivoter"><svg><use href="#i-rotate"/></svg></button>
+    <button class="ib" id="scDel" aria-label="Supprimer la page"><svg><use href="#i-trash"/></svg></button>
+  </header>
+  <div class="scbody" id="scBody">
+    <div class="scstage" id="scStage">
+      <canvas id="scCanvas"></canvas>
+      <svg class="scquad" id="scQuad"><polygon id="scPoly"/></svg>
+    </div>
+  </div>
+  <div class="sctools" id="scCropTools">
+    <button class="ghost" id="scFull">Page entière</button>
+    <button class="primary grow" id="scCropOk">Valider le cadrage</button>
+  </div>
+  <div class="sctools col" id="scFxTools" hidden>
+    <div class="seg dark" id="scFx">
+      <button data-fx="auto" class="on">Document</button>
+      <button data-fx="color">Couleur</button>
+      <button data-fx="gray">Gris</button>
+      <button data-fx="bw">Noir &amp; blanc</button>
+      <button data-fx="none">Original</button>
+    </div>
+    <label class="rng full">Contraste <input type="range" id="scContrast" min="-50" max="80" value="30"></label>
+    <label class="rng full">Luminosité <input type="range" id="scBright" min="-60" max="60" value="5"></label>
+    <div class="scstrip" id="scStrip"></div>
+    <div class="row" style="margin-top:6px">
+      <button class="ghost" id="scRecrop">Recadrer</button>
+      <button class="ghost" id="scMore"><svg><use href="#i-camera"/></svg>Page suivante</button>
+      <button class="primary grow" id="scDone">Créer le PDF</button>
+    </div>
+  </div>
+</section>
+
+<div id="printArea" aria-hidden="true"></div>
+
 <input type="file" id="filePdf" accept="application/pdf,.pdf" hidden>
+<input type="file" id="fileMerge" accept="application/pdf,.pdf" multiple hidden>
+<input type="file" id="fileScan" accept="image/*" capture="environment" hidden>
+<input type="file" id="fileScanGal" accept="image/*" multiple hidden>
 <input type="file" id="fileImg" accept="image/*" hidden>
 <input type="file" id="fileSig" accept="image/*" hidden>
 <input type="file" id="fileConf" accept="application/json,.json" hidden>
