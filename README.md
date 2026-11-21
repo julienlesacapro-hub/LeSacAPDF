@@ -61,6 +61,18 @@ npm run icons                                         # régénère les icônes 
 À chaque nouvelle version, augmentez aussi `VERSION` dans `www/sw.js` : l'ancien cache
 est alors purgé proprement.
 
+## Dons (association PROMEDNAV)
+
+L'écran d'accueil (sans document ouvert) et le menu affichent un appel aux dons pour l'association
+PROMEDNAV. **Pour activer le bouton « Faire un don »**, renseignez le lien de la page de don dans
+`www/js/app.js` :
+
+```js
+const DON_URL = "https://…";   // vide = « Le lien de don sera activé prochainement »
+```
+
+puis augmentez `VERSION` dans `www/sw.js` pour que les téléphones récupèrent la mise à jour.
+
 ## Propriété
 
 © 2026 LESACA Julien — Tous droits réservés. Voir [LICENSE](LICENSE).

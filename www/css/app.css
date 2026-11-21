@@ -474,3 +474,17 @@ body:not(.has-doc) #btnSearch { display: none; }
   #printArea img { display: block; width: 100%; height: auto; page-break-after: always; break-after: page; }
   #printArea img:last-child { page-break-after: auto; break-after: auto; }
 }
+
+/* --------------------------------------------- dons (association PROMEDNAV) */
+.don-card { width: 100%; max-width: 440px; margin-top: 24px; padding: 18px 18px 16px; text-align: left;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow-1); }
+.don-card h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 16px; color: var(--ink); }
+.don-card h3 svg { color: var(--accent); width: 20px; height: 20px; }
+.don-card p { margin: 0; font-size: 14px; color: var(--muted); line-height: 1.5; }
+.don-card p b { color: var(--ink); }
+.don-btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 48px; margin: 14px 0 12px;
+  border-radius: 24px; background: var(--accent); color: #fff; font-weight: 650; font-size: 16px;
+  box-shadow: 0 8px 20px rgba(229, 72, 77, .28); }
+.don-btn svg { width: 20px; height: 20px; fill: currentColor; }
+.don-btn:active { transform: scale(.98); }
+.don-card .don-note { font-size: 12.5px; }

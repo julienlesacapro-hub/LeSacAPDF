@@ -7,7 +7,12 @@
 (function () {
 "use strict";
 
-const APP_VERSION = "3.1.0";
+const APP_VERSION = "3.1.1";
+
+/* Lien de la page de don de l'association PROMEDNAV.
+   À RENSEIGNER : tant qu'il est vide, le bouton « Faire un don » affiche
+   « Le lien de don sera activé prochainement ». */
+const DON_URL = "";
 pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js";
 
 /* ---------------------------------------------------------------- outils */
@@ -2856,6 +2861,12 @@ function applyFx(src, fx, contrast, bright) {
   return out;
 }
 
+/* ----------------------------------------------------- dons (PROMEDNAV) */
+function faireUnDon() {
+  if (!DON_URL) { toast("Le lien de don sera activé prochainement. Merci pour votre soutien !", 3500); return; }
+  window.open(DON_URL, "_blank", "noopener");
+}
+
 /* ------------------------------------------------- branchements de la v3.1 */
 function initV31() {
   /* recherche */
@@ -2936,6 +2947,7 @@ function initV31() {
   });
 
   /* accueil */
+  $("#btnDon").onclick = faireUnDon;
   $("#btnScanHome").onclick = () => openSheet("shScanSrc");
   $("#btnMergeHome").onclick = () => $("#fileMerge").click();
 
@@ -3057,6 +3069,7 @@ function init() {
     },
     search() { closeSheet(); Search.open(); },
     print() { printDoc(); },
+    don() { closeSheet(); faireUnDon(); },
     time() { closeSheet(); setPending({ kind: "text", text: heureStr(new Date()) }, "Touchez l'endroit où placer l'heure"); },
     datetime() {
       closeSheet(); const d = new Date();
