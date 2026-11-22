@@ -7,7 +7,7 @@
 (function () {
 "use strict";
 
-const APP_VERSION = "3.1.1";
+const APP_VERSION = "3.2.0";
 
 /* Lien de la page de don de l'association PROMEDNAV.
    À RENSEIGNER : tant qu'il est vide, le bouton « Faire un don » affiche
@@ -286,7 +286,7 @@ async function openBytes(bytes, name, opt) {
     await readFormFields();
     fitWidth(true);
     render();
-    $("#btnSave").disabled = false;
+    $("#btnSave").disabled = false; $("#btnShare").disabled = false;
     $("#pagePill").hidden = false;
     $("#docTitle").textContent = S.name.replace(/\.pdf$/i, "");
     updateSub();
@@ -1739,14 +1739,28 @@ async function makePdf(mode, targetBytes, gray) {
   }
 }
 
-function openSave() {
+/* intent : "share" (bouton Partager) ou "save" (bouton Enregistrer) */
+function openSave(intent) {
   if (!S.doc) return;
+  S.intent = intent === "share" ? "share" : "save";
+  const share = S.intent === "share";
+  $("#saveTitle").textContent = share ? "Partager le PDF" : "Enregistrer le PDF";
+  $("#saveGo").textContent = share ? "Préparer le partage" : "Créer le PDF";
   $("#saveForm").hidden = false; $("#saveDone").hidden = true;
   $("#saveName").value = S.name.replace(/\.pdf$/i, "") + " - rempli.pdf";
   $("#saveSrc").textContent = S.pages.length + " page" + (S.pages.length > 1 ? "s" : "") +
     (S.srcSize ? " · " + fmtMo(S.srcSize) + " à l'origine" : "");
   syncSmall();
   openSheet("shSave");
+}
+/* écran « PDF prêt » : l'action demandée passe en premier */
+function setDoneMode(intent) {
+  const sh = $("#doneShare"), dl = $("#doneDl"), save = intent === "save";
+  sh.className = (save ? "ghost" : "primary") + " wide";
+  dl.className = (save ? "primary" : "ghost") + " wide";
+  sh.innerHTML = icon("share") + (save ? "Partager" : "Partager ou enregistrer");
+  dl.innerHTML = icon("save") + (save ? "Enregistrer le fichier" : "Télécharger");
+  if (save) sh.before(dl); else dl.before(sh);
 }
 function syncSmall() {
   const small = $$('input[name=smode]').find(r => r.checked).value === "small";
@@ -2184,6 +2198,7 @@ function showResult(bytes, name, info) {
   $("#doneInfo").textContent = (info ? info + " · " : "") + fmtMo(bytes.length);
   $("#saveForm").hidden = true; $("#saveDone").hidden = false;
   $("#doneOpen").hidden = false;
+  setDoneMode("share");
   openSheet("shSave");
 }
 
@@ -3113,7 +3128,9 @@ function init() {
   $("#chkFlatten").onchange = e => { PREF.flatten = e.target.checked; Prof.savePref(); };
 
   /* enregistrement / partage */
-  $("#btnSave").onclick = () => { setTool("select"); select(null); openSave(); };
+  $("#btnSave").onclick = () => { setTool("select"); select(null); openSave("save"); };
+  $("#btnShare").onclick = () => { setTool("select"); select(null); openSave("share"); };
+  $("#btnPrint").onclick = () => printDoc();
   $$('input[name=smode]').forEach(r => r.onchange = syncSmall);
   $("#saveGo").onclick = async () => {
     const mode = $$('input[name=smode]').find(r => r.checked).value;
@@ -3129,6 +3146,7 @@ function init() {
       $("#doneInfo").textContent = "PDF prêt · " + fmtMo(r.bytes.length) + (r.note ? " · " + r.note : "");
       $("#saveForm").hidden = true; $("#saveDone").hidden = false;
       $("#doneOpen").hidden = true;
+      setDoneMode(S.intent);
       Recents.add(r.bytes, nm);
       $("#shSave").scrollTop = 0;
     } catch (e) {
@@ -3195,7 +3213,7 @@ function init() {
     const c = e.ctrlKey || e.metaKey;
     if (c && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
     if (c && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
-    if (c && e.key.toLowerCase() === "s") { e.preventDefault(); openSave(); return; }
+    if (c && e.key.toLowerCase() === "s") { e.preventDefault(); openSave("save"); return; }
     if (c && e.key.toLowerCase() === "f") { e.preventDefault(); Search.open(); return; }
     if (c && e.key.toLowerCase() === "p") { e.preventDefault(); printDoc(); return; }
     if (c && e.key.toLowerCase() === "o") { e.preventDefault(); pick(); return; }

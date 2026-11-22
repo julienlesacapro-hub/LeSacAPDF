@@ -347,8 +347,12 @@ input[type=range] { accent-color: var(--brand); }
    tampons, documents récents, impression.
    ===================================================================== */
 .menu button small { color: var(--muted); font-size: 12.5px; margin-left: -6px; }
-body:not(.has-doc) #btnSearch { display: none; }
-@media (max-width: 400px) { #btnRedo { display: none; } }
+body:not(.has-doc) #btnSearch, body:not(.has-doc) #btnPrint, body:not(.has-doc) #btnShare { display: none; }
+@media (max-width: 440px) { #btnRedo { display: none; } }
+@media (max-width: 360px) { #btnSearch { display: none; } }
+.ib.accent { background: var(--brand); color: var(--brand-ink); width: 38px; height: 38px; border-radius: 19px; margin-left: 2px; }
+.ib.accent svg { width: 19px; height: 19px; }
+.ib.accent:active:not(:disabled) { filter: brightness(1.15); background: var(--brand); }
 
 /* accueil */
 .home-actions { display: flex; gap: 10px; margin-top: 12px; }
