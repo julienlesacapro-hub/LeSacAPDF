@@ -48,7 +48,8 @@ Une seule fois : *Settings → Pages → Build and deployment → Source : **Git
 | **4.0** — Filigrane | texte (préréglages PROJET, CONFIDENTIEL, « Usage exclusivement destiné à la location »…) ou image ; emplacement (diagonale, centre, haut, bas, mosaïque), transparence, police, gras, couleur, taille ou ajustement automatique |
 | **4.0** — Mot de passe | chiffrement AES-256 (norme PDF 2.0, révision 6) à l'enregistrement d'un PDF |
 | **4.0** — PDF/A, PowerPoint, Excel | PDF/A-2b (pages en images, profil sRGB intégré) ; PowerPoint .pptx (image fidèle ou texte modifiable) ; Excel .xlsx (une feuille par page, colonnes détectées, nombres en € et % reconnus) |
-| **4.0** — Convertir en PDF | images (JPG, PNG, WebP…), Word .docx, OpenDocument .odt, PowerPoint .pptx, HTML, texte → un seul PDF (les documents mis en page deviennent des images ; .doc/.ppt anciens non pris en charge) |
+| **4.0** — Convertir en PDF | images (JPG, PNG, WebP…), Word .docx, OpenDocument .odt, PowerPoint .pptx, HTML, texte → un seul PDF (les documents mis en page deviennent des images) |
+| **4.1** — Anciens formats Office | Word .doc et PowerPoint .ppt (97-2003) → PDF : texte et structure repris (paragraphes, tableaux, une page par diapositive avec titre et puces), sans les images ni la mise en forme d'origine |
 | **4.0** — Censure définitive | rectangles noirs ou « censurer tous les résultats » d'une recherche ; les pages concernées sont rastérisées à l'enregistrement : le contenu caché est supprimé |
 | **4.0** — Comparer | deux PDF côte à côte, lignes modifiées surlignées (A rouge / B vert), navigation de différence en différence, mode visuel (pixels) |
 | Confort mobile | pincer pour zoomer, annuler/rétablir, aperçu des pages, mode sombre, hors connexion |
@@ -89,6 +90,6 @@ puis augmentez `VERSION` dans `www/sw.js` pour que les téléphones récupèrent
 Bibliothèques incluses : [pdf.js 3.11.174](https://github.com/mozilla/pdf.js) (Apache 2.0,
 variante *legacy* pour les iPhone plus anciens) et [pdf-lib 1.17.1](https://github.com/Hopding/pdf-lib)
 (MIT), mêmes versions que dans `EditeurPDF.html` ; pour la conversion vers PDF :
-[html2canvas 1.4.1](https://github.com/niklasvh/html2canvas) (MIT) et [mammoth 1.13.0](https://github.com/mwilliamson/mammoth.js)
-(BSD-2), chargés seulement quand on les utilise — licences dans `www/vendor/`. Le profil de couleur sRGB du PDF/A
+[html2canvas 1.4.1](https://github.com/niklasvh/html2canvas) (MIT), [mammoth 1.13.0](https://github.com/mwilliamson/mammoth.js)
+(BSD-2) et [cfb 1.2.2](https://github.com/SheetJS/js-cfb) (Apache 2.0, lecture des fichiers .doc et .ppt), chargés seulement quand on les utilise — licences dans `www/vendor/`. Le profil de couleur sRGB du PDF/A
 est généré pour l'application à partir des valeurs publiques de la norme IEC 61966-2-1.

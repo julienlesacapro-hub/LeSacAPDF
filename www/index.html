@@ -453,7 +453,8 @@
     <dt>Mot de passe</dt><dd>Enregistrer → PDF → « Protéger par un mot de passe » : chiffrement AES-256. Sans le mot de passe,
       le document ne peut plus être ouvert.</dd>
     <dt>Autres formats</dt><dd>PDF/A (archivage), image, Word, ODT, PowerPoint, Excel, texte.</dd>
-    <dt>Convertir en PDF</dt><dd>Images, Word (.docx), ODT, PowerPoint (.pptx), pages web, texte : réunis dans un seul PDF.</dd>
+    <dt>Convertir en PDF</dt><dd>Images, Word (.docx, .doc), ODT, PowerPoint (.pptx, .ppt), pages web, texte : réunis dans un seul PDF.
+      Pour .doc et .ppt, seuls le texte et sa structure sont repris.</dd>
     <dt>Comparer</dt><dd>Menu ⋮ → Comparer : les deux PDF côte à côte, lignes modifiées surlignées (rouge : version A, vert :
       version B), ou mode visuel pour les documents scannés.</dd>
     <dt>Imprimer</dt><dd>Menu ⋮ → Imprimer : la fenêtre d'impression du téléphone s'ouvre (AirPrint, Mopria…).</dd>
@@ -527,12 +528,13 @@
 <section class="sheet" id="shConv" aria-label="Convertir en PDF">
   <div class="grab"></div>
   <h2>Convertir en PDF</h2>
-  <p class="sub">Images (JPG, PNG, WebP…), Word (.docx), OpenDocument (.odt), PowerPoint (.pptx), pages web (.html), texte (.txt)
-    ou PDF. Plusieurs fichiers sont réunis dans un seul PDF, dans l'ordre choisi.</p>
+  <p class="sub">Images (JPG, PNG, WebP…), Word (.docx et ancien .doc), OpenDocument (.odt), PowerPoint (.pptx et ancien .ppt),
+    pages web (.html), texte (.txt) ou PDF. Plusieurs fichiers sont réunis dans un seul PDF, dans l'ordre choisi.</p>
   <label class="field-l">Taille des pages pour les images
     <select id="convFit"><option value="a4">A4, image ajustée (marges)</option><option value="image">Taille de l'image</option></select></label>
   <p class="sub">Les documents Word, ODT, PowerPoint et HTML sont mis en page puis enregistrés en images : le texte n'est pas
-    sélectionnable et la mise en page peut différer légèrement de l'original. Les anciens formats (.doc, .ppt) ne sont pas pris en charge.</p>
+    sélectionnable et la mise en page peut différer légèrement de l'original. Pour les anciens formats .doc et .ppt (Office 97-2003),
+    seuls le texte et sa structure sont repris (paragraphes, tableaux, diapositives), sans les images ni la mise en forme.</p>
   <button class="primary wide" id="convPick"><svg><use href="#i-open"/></svg>Choisir des fichiers</button>
 </section>
 
@@ -642,7 +644,7 @@
 
 <input type="file" id="filePdf" accept="application/pdf,.pdf" hidden>
 <input type="file" id="fileWm" accept="image/*" hidden>
-<input type="file" id="fileConv" accept="image/*,.pdf,.docx,.odt,.pptx,.html,.htm,.txt,.doc,.ppt,application/pdf" multiple hidden>
+<input type="file" id="fileConv" accept="image/*,.pdf,.docx,.doc,.dot,.odt,.pptx,.ppt,.pps,.pot,.html,.htm,.txt,application/pdf" multiple hidden>
 <input type="file" id="fileCmp" accept="application/pdf,.pdf" hidden>
 <input type="file" id="fileMerge" accept="application/pdf,.pdf" multiple hidden>
 <input type="file" id="fileScan" accept="image/*" capture="environment" hidden>

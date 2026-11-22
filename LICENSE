@@ -8,5 +8,5 @@ l'auteur est interdite.
 
 Exception : les bibliothèques tierces incluses dans www/vendor/ restent
 soumises à leur propre licence (pdf.js : Apache 2.0, pdf-lib : MIT, html2canvas : MIT,
-mammoth : BSD-2), dont
+mammoth : BSD-2, cfb : Apache 2.0), dont
 le texte figure dans ce même dossier.

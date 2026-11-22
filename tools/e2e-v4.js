@@ -139,11 +139,14 @@ const pdfStreams = f => {
   await conv([odt], "odt", 1);
   /* PowerPoint : on reconvertit la présentation « texte » produite plus haut (3 diapositives) */
   await conv([path.join(outDir, tag + "-texte.pptx")], "powerpoint", 3);
-  /* ancien format : message explicite, pas de plantage */
-  const oldDoc = path.join(outDir, "ancien.doc"); fs.writeFileSync(oldDoc, "fichier Word 97");
+  /* anciens formats Office 97-2003 (chemins facultatifs : variables OLD_DOC et OLD_PPT) */
+  if (process.env.OLD_DOC) await conv([process.env.OLD_DOC], "word-97", 1);
+  if (process.env.OLD_PPT) await conv([process.env.OLD_PPT], "powerpoint-97", 3);
+  /* fichier .doc invalide : message explicite, pas de plantage */
+  const badDoc = path.join(outDir, "invalide.doc"); fs.writeFileSync(badDoc, "ceci n'est pas un fichier Word");
   await menu("convert"); await p.waitForSelector("#shConv.on");
-  await p.setInputFiles("#fileConv", oldDoc); await p.waitForTimeout(1500);
-  ok(/ancien format/.test(await p.locator("#toast").textContent()), "ancien format .doc : message explicite");
+  await p.setInputFiles("#fileConv", badDoc); await p.waitForTimeout(1500);
+  ok(/Aucun fichier n'a pu être converti/.test(await p.locator("#toast").textContent()), "fichier .doc invalide : message explicite");
 
   ok(errors.length === 0, "aucune erreur JavaScript" + (errors.length ? " : " + errors.join(" | ") : ""));
   await b.close();

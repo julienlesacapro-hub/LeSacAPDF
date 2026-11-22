@@ -7,7 +7,7 @@
 (function () {
 "use strict";
 
-const APP_VERSION = "4.0.0";
+const APP_VERSION = "4.1.0";
 
 /* Lien de la page de don de l'association PROMEDNAV.
    À RENSEIGNER : tant qu'il est vide, le bouton « Faire un don » affiche
@@ -3982,7 +3982,7 @@ const Conv = {
         const f = files[fi], name = f.name || "", low = name.toLowerCase();
         busy(true, "Conversion de « " + name + " » (" + (fi + 1) + "/" + files.length + ")…");
         await yieldUI();
-        if (/\.(ppt|doc|xls|pps|pot|dot|rtf|pages|key|numbers)$/i.test(low)) { skipped.push(name + " (ancien format)"); continue; }
+        if (/\.(xls|rtf|pages|key|numbers)$/i.test(low)) { skipped.push(name + " (format non pris en charge)"); continue; }
         try {
           if (/^image\//.test(f.type) || /\.(jpe?g|png|gif|webp|bmp|heic|heif|avif)$/i.test(low)) {
             await Conv.image(out, f, fit);
@@ -3994,6 +3994,13 @@ const Conv = {
             await canvasesToPdf(out, await renderHtmlPages(body, css));
           } else if (/\.txt$/i.test(low) || f.type === "text/plain") {
             await canvasesToPdf(out, await renderHtmlPages('<pre style="white-space:pre-wrap;font:10.5pt/1.4 Consolas,monospace">' + xe(await f.text()) + "</pre>"));
+          } else if (/\.(doc|dot)$/i.test(low)) {
+            await loadScript("vendor/cfb.min.js");
+            await canvasesToPdf(out, await renderHtmlPages(docToHtml(await f.arrayBuffer())));
+          } else if (/\.(ppt|pps|pot)$/i.test(low)) {
+            await loadScript("vendor/cfb.min.js");
+            const r = await pptToCanvases(await f.arrayBuffer(), (i, n) => busy(true, "« " + name + " » : diapositive " + i + " sur " + n + "…"));
+            await canvasesToPdf(out, r.canvases, r.w, r.h);
           } else if (/\.docx$/i.test(low)) {
             await loadScript("vendor/mammoth.browser.min.js");
             const r = await window.mammoth.convertToHtml({ arrayBuffer: await f.arrayBuffer() });
@@ -4008,7 +4015,7 @@ const Conv = {
             const r = await pptxToCanvases(z, (i, n) => busy(true, "« " + name + " » : diapositive " + i + " sur " + n + "…"));
             await canvasesToPdf(out, r.canvases, r.w, r.h);
           } else { skipped.push(name + " (format inconnu)"); }
-        } catch (e) { console.error(e); skipped.push(name + " (" + e.message + ")"); }
+        } catch (e) { console.warn("conversion impossible :", name, e); skipped.push(name + " (" + e.message + ")"); }
       }
       if (!out.getPageCount()) { busy(false); toast("Aucun fichier n'a pu être converti : " + skipped.join(", "), 7000); return; }
       const first = files[0].name.replace(/\.[^.]+$/, "") || "document";
@@ -4016,7 +4023,9 @@ const Conv = {
       busy(false);
       if (curSheet) closeSheet();
       await openBytes(bytes, (files.length > 1 ? first + " et autres" : first) + ".pdf");
-      if (skipped.length) toast("Non convertis : " + skipped.join(" · ") + ". Pour un ancien format (.doc, .ppt), enregistrez-le d'abord en .docx ou .pptx.", 9000);
+      if (skipped.length) toast("Non convertis : " + skipped.join(" · "), 9000);
+      else if (files.some(x => /\.(doc|dot|ppt|pps|pot)$/i.test(x.name || "")))
+        toast("Ancien format Office : texte et structure repris, sans les images ni la mise en forme d'origine.", 6000);
       else toast("Conversion terminée : " + out.getPageCount() + " page" + (out.getPageCount() > 1 ? "s" : "") + ".", 3000);
     } finally { busy(false); }
   },
@@ -4207,6 +4216,218 @@ const Cmp = {
     $("#cmpCount").textContent = "Différence " + (Cmp.cur + 1) + " sur " + Cmp.diffs.length;
   }
 };
+
+/* =====================================================================
+   VERSION 4.1 — anciens formats Office 97-2003 (.doc, .ppt).
+   Conteneur lu avec cfb (SheetJS, Apache 2.0) ; texte et structure
+   extraits selon les spécifications publiques [MS-DOC] et [MS-PPT].
+   Les images et la mise en forme fine ne sont pas reprises.
+   ===================================================================== */
+const cfbStream = (cfb, name) => {
+  const e = window.CFB.find(cfb, name);
+  return e && e.content ? (e.content instanceof Uint8Array ? e.content : Uint8Array.from(e.content)) : null;
+};
+const u16 = (b, o) => b[o] | (b[o + 1] << 8);
+const u32 = (b, o) => (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
+
+/* --- Word 97-2003 (.doc) : texte du document principal via la table des pièces */
+function docToHtml(buf) {
+  const cfb = window.CFB.read(new Uint8Array(buf), { type: "array" });
+  const wd = cfbStream(cfb, "WordDocument");
+  if (!wd || u16(wd, 0) !== 0xA5EC) throw new Error("fichier Word 97-2003 non reconnu");
+  const flags = u16(wd, 0x0A);
+  if (flags & 0x0100) throw new Error("document protégé par mot de passe");
+  const table = cfbStream(cfb, (flags & 0x0200) ? "1Table" : "0Table");
+  if (!table) throw new Error("table du document introuvable");
+  /* FIB : base (32 o), puis tableaux de mots, de longs et de paires fc/lcb */
+  const csw = u16(wd, 32), lwPos = 34 + csw * 2, cslw = u16(wd, lwPos);
+  const ccpText = u32(wd, lwPos + 2 + 3 * 4);
+  const fcPos = lwPos + 2 + cslw * 4 + 2;
+  const fcClx = u32(wd, fcPos + 33 * 8), lcbClx = u32(wd, fcPos + 33 * 8 + 4);
+  /* Clx : blocs Prc (0x01) à ignorer, puis Pcdt (0x02) */
+  let p = fcClx;
+  while (p < fcClx + lcbClx && table[p] === 0x01) p += 3 + u16(table, p + 1);
+  if (table[p] !== 0x02) throw new Error("structure du texte illisible");
+  const lcb = u32(table, p + 1), plc = p + 5, n = (lcb - 4) / 12;
+  const cp1252 = new TextDecoder("windows-1252"), utf16 = new TextDecoder("utf-16le");
+  let text = "";
+  for (let i = 0; i < n && text.length < ccpText; i++) {
+    const cp0 = u32(table, plc + i * 4), cp1 = u32(table, plc + (i + 1) * 4);
+    const fcv = u32(table, plc + (n + 1) * 4 + i * 8 + 2);
+    const compressed = (fcv & 0x40000000) !== 0, fc = fcv & 0x3FFFFFFF, len = cp1 - cp0;
+    text += compressed ? cp1252.decode(wd.subarray(fc / 2, fc / 2 + len)) : utf16.decode(wd.subarray(fc, fc + len * 2));
+  }
+  text = text.slice(0, ccpText);
+  /* champs : \x13 code \x14 résultat \x15 -> on garde le résultat */
+  let out = "", depth = 0, showing = [true];
+  for (const ch of text) {
+    if (ch === "\x13") { depth++; showing.push(false); continue; }
+    if (ch === "\x14") { showing[showing.length - 1] = true; continue; }
+    if (ch === "\x15") { if (depth) { depth--; showing.pop(); } continue; }
+    if (showing.every(Boolean)) out += ch;
+  }
+  /* paragraphes (\r), cellules (\x07), saut de ligne (\x0b), saut de page (\x0c) */
+  const clean = s => xe(s.replace(/[\x01\x02\x05\x08]/g, "").replace(/\x1e/g, "-").replace(/\x1f/g, "").replace(/\xa0/g, " "))
+    .replace(/\x0b/g, "<br>").replace(/\t/g, "&emsp;");
+  let html = "", row = [], rows = [], seg = "";
+  const flushTable = () => {
+    ncols = 0;
+    if (!rows.length) return;
+    html += "<table>" + rows.map(r => "<tr>" + r.map(c => "<td>" + (clean(c) || "&nbsp;") + "</td>").join("") + "</tr>").join("") + "</table>";
+    rows = [];
+  };
+  const para = s => {
+    const parts = s.split("\x0c");
+    parts.forEach((t, k) => {
+      if (k) html += '<div style="break-before:page;page-break-before:always;height:0"></div>';
+      if (t.trim()) html += "<p>" + clean(t) + "</p>"; else if (!k) html += "<p>&nbsp;</p>";
+    });
+  };
+  /* une cellule vide et la marque de fin de ligne s'écrivent pareil : on se fie
+     au nombre de colonnes de la première ligne du tableau */
+  let ncols = 0;
+  for (const ch of out) {
+    if (ch === "\x07") {
+      const rowEnd = seg === "" && row.length && (!ncols || row.length >= ncols);
+      if (rowEnd) { if (!ncols) ncols = row.length; rows.push(row); row = []; }
+      else row.push(seg);
+      seg = "";
+    } else if (ch === "\r") {
+      if (row.length) { row[row.length - 1] += "\x0b" + seg; seg = ""; continue; }
+      flushTable();
+      para(seg); seg = "";
+    } else seg += ch;
+  }
+  if (row.length) rows.push(row);
+  flushTable();
+  if (seg) para(seg);
+  /* premier paragraphe court : présenté comme un titre */
+  return html.replace(/^<p>([^<]{1,90})<\/p>/, "<h1>$1</h1>");
+}
+
+/* --- PowerPoint 97-2003 (.ppt) : texte de chaque diapositive, dans l'ordre */
+function pptSlides(buf) {
+  const cfb = window.CFB.read(new Uint8Array(buf), { type: "array" });
+  const ps = cfbStream(cfb, "PowerPoint Document");
+  if (!ps) throw new Error("fichier PowerPoint 97-2003 non reconnu");
+  const cu = cfbStream(cfb, "Current User");
+  const hdr = o => ({ inst: u16(ps, o) >> 4, ver: u16(ps, o) & 0xF, type: u16(ps, o + 2), len: u32(ps, o + 4) });
+  /* répertoire de persistance : identifiant -> position, de la plus ancienne à la plus récente édition */
+  const persist = {};
+  let docRef = 0;
+  try {
+    let edit = cu ? u32(cu, 16) : -1, guard = 0, firstDoc = 0;
+    const chain = [];
+    while (edit >= 0 && edit < ps.length && guard++ < 200) {
+      const h = hdr(edit); if (h.type !== 0x0FF5) break;
+      chain.push(edit);
+      if (!firstDoc) firstDoc = u32(ps, edit + 8 + 16);
+      const last = u32(ps, edit + 8 + 8);
+      if (!last) break;
+      edit = last;
+    }
+    docRef = firstDoc;
+    for (const e of chain.reverse()) {
+      const pd = u32(ps, e + 8 + 12), h = hdr(pd);
+      if (h.type !== 0x1772) continue;
+      let q = pd + 8;
+      while (q < pd + 8 + h.len) {
+        const v = u32(ps, q), id = v & 0xFFFFF, cnt = v >>> 20; q += 4;
+        for (let k = 0; k < cnt; k++) { persist[id + k] = u32(ps, q); q += 4; }
+      }
+    }
+  } catch (e) { console.warn("répertoire PowerPoint :", e); }
+  const dec = new TextDecoder("utf-16le"), lat = new TextDecoder("windows-1252");
+  const textAt = (o, h) => h.type === 0x0FA0 ? dec.decode(ps.subarray(o + 8, o + 8 + h.len)) : lat.decode(ps.subarray(o + 8, o + 8 + h.len));
+  /* textes d'un conteneur (zones de texte des formes) */
+  const collect = (start, end, out) => {
+    let o = start;
+    while (o + 8 <= end) {
+      const h = hdr(o);
+      if (h.ver === 0xF) collect(o + 8, o + 8 + h.len, out);
+      else if (h.type === 0x0FA0 || h.type === 0x0FA8) out.push({ t: textAt(o, h), kind: "other" });
+      else if (h.type === 0x0F9F) out.push({ header: u32(ps, o + 8) });
+      o += 8 + h.len;
+    }
+    return out;
+  };
+  /* type de texte : 0 titre, 6 titre centré, 1/5 corps, 2 notes, 4 autre */
+  const typed = list => {
+    const res = []; let cur = 4;
+    for (const x of list) { if (x.header !== undefined) cur = x.header; else if (cur !== 2) res.push({ t: x.t, kind: cur === 0 || cur === 6 ? "title" : (cur === 1 || cur === 5) ? "body" : "other" }); }
+    return res;
+  };
+  let slideSize = [5760, 4320], slides = [];
+  const docOff = persist[docRef];
+  if (docOff !== undefined && hdr(docOff).type === 0x03E8) {
+    const dh = hdr(docOff);
+    let o = docOff + 8;
+    while (o < docOff + 8 + dh.len) {
+      const h = hdr(o);
+      if (h.type === 0x03E9) slideSize = [u32(ps, o + 8), u32(ps, o + 12)];
+      if (h.type === 0x0FF0 && h.inst === 0) {
+        /* liste des diapositives : SlidePersistAtom suivi des textes de ses espaces réservés */
+        let q = o + 8, curSlide = null;
+        while (q < o + 8 + h.len) {
+          const r = hdr(q);
+          if (r.type === 0x03F3) { curSlide = { ref: u32(ps, q + 8), list: [] }; slides.push(curSlide); }
+          else if (curSlide && (r.type === 0x0FA0 || r.type === 0x0FA8)) curSlide.list.push({ t: textAt(q, r) });
+          else if (curSlide && r.type === 0x0F9F) curSlide.list.push({ header: u32(ps, q + 8) });
+          q += 8 + r.len;
+        }
+      }
+      o += 8 + h.len;
+    }
+  }
+  if (slides.length) {
+    return { size: slideSize, slides: slides.map(s => {
+      const texts = typed(s.list);
+      const so = persist[s.ref];
+      if (so !== undefined && hdr(so).type === 0x03EE) {
+        const h = hdr(so), own = typed(collect(so + 8, so + 8 + h.len, []));
+        for (const x of own) if (!texts.some(y => y.t === x.t)) texts.push(x);
+      }
+      return texts;
+    }) };
+  }
+  /* secours : parcours linéaire des diapositives (fichier inhabituel) */
+  const found = [];
+  let o = 0;
+  const walk = (start, end) => {
+    let q = start;
+    while (q + 8 <= end) {
+      const h = hdr(q);
+      if (h.type === 0x03EE) found.push(typed(collect(q + 8, q + 8 + h.len, [])));
+      else if (h.ver === 0xF) walk(q + 8, q + 8 + h.len);
+      q += 8 + h.len;
+    }
+  };
+  walk(o, ps.length);
+  return { size: slideSize, slides: found };
+}
+async function pptToCanvases(buf, onSlide) {
+  const { size, slides } = pptSlides(buf);
+  if (!slides.length) throw new Error("aucune diapositive trouvée");
+  /* unités principales : 576 par pouce -> points = /8 */
+  const wPt = size[0] / 8, hPt = size[1] / 8, pxW = Math.round(wPt * 96 / 72), pxH = Math.round(hPt * 96 / 72);
+  const out = [];
+  for (let i = 0; i < slides.length; i++) {
+    if (onSlide) onSlide(i + 1, slides.length);
+    const texts = slides[i];
+    const lines = s => s.split(/[\r\x0b]/).map(l => l.trim()).filter(Boolean);
+    const title = texts.filter(x => x.kind === "title").map(x => lines(x.t).map(xe).join("<br>")).join("<br>");
+    const body = texts.filter(x => x.kind !== "title").map(x =>
+      "<ul>" + lines(x.t).map(l => "<li>" + xe(l) + "</li>").join("") + "</ul>").join("");
+    const html = '<div style="position:relative;width:' + pxW + "px;height:" + pxH + 'px;overflow:hidden;background:#fff;box-sizing:border-box;padding:' +
+      Math.round(pxH * 0.06) + "px " + Math.round(pxW * 0.06) + 'px;font-family:Calibri,Carlito,Arial,sans-serif;color:#111">' +
+      (title ? '<div style="font-size:' + Math.round(pxH * 0.075) + 'px;font-weight:bold;margin-bottom:' + Math.round(pxH * 0.04) + 'px;color:#1B3558">' + title + "</div>" : "") +
+      '<div style="font-size:' + Math.round(pxH * 0.045) + 'px;line-height:1.35">' + body + "</div>" +
+      '<div style="position:absolute;right:' + Math.round(pxW * 0.03) + "px;bottom:" + Math.round(pxH * 0.025) + "px;font-size:" + Math.round(pxH * 0.025) + 'px;color:#999">' + (i + 1) + "</div></div>";
+    const [c] = await renderHtmlPages(html, "<style>ul{margin:0 0 .4em;padding-left:1.2em}li{margin:.15em 0}</style>", { raw: true, pxW, pxH });
+    out.push(c);
+  }
+  return { canvases: out, w: wPt, h: hPt };
+}
 
 /* ------------------------------------------------- branchements de la v4 */
 function initV4() {

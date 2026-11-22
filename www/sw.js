@@ -1,10 +1,10 @@
 /* LeSacAPDF — © 2026 LESACA Julien — Tous droits réservés
    Service worker : fonctionnement hors ligne + réception des
    PDF partagés depuis d'autres applications (Android). */
-const VERSION = "lesacapdf-v4.0.0";
+const VERSION = "lesacapdf-v4.1.0";
 const FILES = [
   "./", "index.html", "css/app.css", "js/app.js", "manifest.webmanifest",
-  "vendor/pdf.min.js", "vendor/pdf.worker.min.js", "vendor/pdf-lib.min.js", "vendor/html2canvas.min.js", "vendor/mammoth.browser.min.js",
+  "vendor/pdf.min.js", "vendor/pdf.worker.min.js", "vendor/pdf-lib.min.js", "vendor/html2canvas.min.js", "vendor/mammoth.browser.min.js", "vendor/cfb.min.js",
   "icons/icon-192.png", "icons/icon-512.png",
   "icons/maskable-192.png", "icons/maskable-512.png", "icons/apple-touch-icon.png", "icons/favicon-32.png"
 ];
