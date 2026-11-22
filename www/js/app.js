@@ -7,7 +7,7 @@
 (function () {
 "use strict";
 
-const APP_VERSION = "3.3.0";
+const APP_VERSION = "3.3.1";
 
 /* Lien de la page de don de l'association PROMEDNAV.
    À RENSEIGNER : tant qu'il est vide, le bouton « Faire un don » affiche

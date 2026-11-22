@@ -492,6 +492,9 @@ body:not(.has-doc) #btnSearch, body:not(.has-doc) #btnPrint, body:not(.has-doc) 
 .don-btn svg { width: 20px; height: 20px; fill: currentColor; }
 .don-btn:active { transform: scale(.98); }
 .don-card .don-note { font-size: 12.5px; }
+.don-card .don-secure { display: flex; align-items: center; justify-content: center; gap: 6px; margin: -4px 0 12px;
+  font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.don-card .don-secure svg { width: 15px; height: 15px; color: var(--ok); }
 
 /* ------------------------------------------------ choix du format d'export */
 .seg.fmt { margin: 0 0 10px; }
