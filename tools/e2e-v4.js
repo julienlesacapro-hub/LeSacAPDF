@@ -79,7 +79,9 @@ const pdfStreams = f => {
   await p.locator("#btnSave").tap(); await p.waitForTimeout(300); await p.locator("#encOn").uncheck(); await p.locator("#saveForm [data-close]").tap(); await p.waitForTimeout(300);
 
   // --- formats PDF/A, PowerPoint (2 modes), Excel
-  r = await save("pdfa", null, "pdfa.pdf"); ok(/PDF\/A-2b/.test(r.info), "PDF/A : " + r.info);
+  r = await save("pdfa", null, "pdfa.pdf"); ok(/PDF\/A-2a · \d+ mots/.test(r.info), "PDF/A (2a par défaut) : " + r.info);
+  r = await save("pdfa", async () => p.locator('input[name=pdfaLevel][value=b]').check(), "pdfa-2b.pdf"); ok(/PDF\/A-2b/.test(r.info), "PDF/A-2b : " + r.info);
+  ok(/numéro 12/.test(txt(path.join(outDir, tag + "-pdfa.pdf"))), "PDF/A-2a : texte sélectionnable (pdftotext)");
   r = await save("pptx", null, "images.pptx"); ok(/PowerPoint/.test(r.info), "PowerPoint (images) : " + r.info);
   r = await save("pptx", async () => p.locator('input[name=pptMode][value=text]').check(), "texte.pptx"); ok(true, "PowerPoint (texte) : " + r.info);
   r = await save("xlsx", null, "tableau.xlsx"); ok(/feuille/.test(r.info), "Excel : " + r.info);
@@ -142,6 +144,8 @@ const pdfStreams = f => {
   /* anciens formats Office 97-2003 (chemins facultatifs : variables OLD_DOC et OLD_PPT) */
   if (process.env.OLD_DOC) await conv([process.env.OLD_DOC], "word-97", 1);
   if (process.env.OLD_PPT) await conv([process.env.OLD_PPT], "powerpoint-97", 3);
+  if (process.env.OLD_XLS) await conv([process.env.OLD_XLS], "excel-97", 2);
+  if (process.env.XLSX) await conv([process.env.XLSX], "excel", 2);
   /* fichier .doc invalide : message explicite, pas de plantage */
   const badDoc = path.join(outDir, "invalide.doc"); fs.writeFileSync(badDoc, "ceci n'est pas un fichier Word");
   await menu("convert"); await p.waitForSelector("#shConv.on");

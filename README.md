@@ -47,8 +47,9 @@ Une seule fois : *Settings → Pages → Build and deployment → Source : **Git
 | **3.3** — Autres formats | Enregistrer / Partager en **image** (PNG ou JPEG, 96 à 300 ppp, une image par page, ZIP au téléchargement), **Word** (.docx), **OpenDocument** (.odt) ou **texte** (.txt) : texte extrait et modifiable, mise en page non conservée, option « image de chaque page » pour les PDF scannés |
 | **4.0** — Filigrane | texte (préréglages PROJET, CONFIDENTIEL, « Usage exclusivement destiné à la location »…) ou image ; emplacement (diagonale, centre, haut, bas, mosaïque), transparence, police, gras, couleur, taille ou ajustement automatique |
 | **4.0** — Mot de passe | chiffrement AES-256 (norme PDF 2.0, révision 6) à l'enregistrement d'un PDF |
-| **4.0** — PDF/A, PowerPoint, Excel | PDF/A-2b (pages en images, profil sRGB intégré) ; PowerPoint .pptx (image fidèle ou texte modifiable) ; Excel .xlsx (une feuille par page, colonnes détectées, nombres en € et % reconnus) |
+| **4.0** — PDF/A, PowerPoint, Excel | PDF/A au choix : **2a** (texte sélectionnable + document balisé : paragraphes, langue), **2u** (texte Unicode sélectionnable) ou **2b** (apparence seule) — pages en images fidèles, couche de texte invisible avec police Liberation Sans intégrée, profil sRGB ; validé par veraPDF aux trois niveaux ; PowerPoint .pptx (image fidèle ou texte modifiable) ; Excel .xlsx (une feuille par page, colonnes détectées, nombres en € et % reconnus) |
 | **4.0** — Convertir en PDF | images (JPG, PNG, WebP…), Word .docx, OpenDocument .odt, PowerPoint .pptx, HTML, texte → un seul PDF (les documents mis en page deviennent des images) |
+| **4.2** — Excel → PDF | .xls (97-2003) et .xlsx : une section par feuille visible, valeurs affichées comme dans Excel (dates, €, %, décimales, résultats des formules), cellules fusionnées ; tableaux larges en paysage ; couleurs et bordures d'origine non reprises |
 | **4.1** — Anciens formats Office | Word .doc et PowerPoint .ppt (97-2003) → PDF : texte et structure repris (paragraphes, tableaux, une page par diapositive avec titre et puces), sans les images ni la mise en forme d'origine |
 | **4.0** — Censure définitive | rectangles noirs ou « censurer tous les résultats » d'une recherche ; les pages concernées sont rastérisées à l'enregistrement : le contenu caché est supprimé |
 | **4.0** — Comparer | deux PDF côte à côte, lignes modifiées surlignées (A rouge / B vert), navigation de différence en différence, mode visuel (pixels) |
@@ -91,5 +92,7 @@ Bibliothèques incluses : [pdf.js 3.11.174](https://github.com/mozilla/pdf.js) (
 variante *legacy* pour les iPhone plus anciens) et [pdf-lib 1.17.1](https://github.com/Hopding/pdf-lib)
 (MIT), mêmes versions que dans `EditeurPDF.html` ; pour la conversion vers PDF :
 [html2canvas 1.4.1](https://github.com/niklasvh/html2canvas) (MIT), [mammoth 1.13.0](https://github.com/mwilliamson/mammoth.js)
-(BSD-2) et [cfb 1.2.2](https://github.com/SheetJS/js-cfb) (Apache 2.0, lecture des fichiers .doc et .ppt), chargés seulement quand on les utilise — licences dans `www/vendor/`. Le profil de couleur sRGB du PDF/A
+(BSD-2), [cfb 1.2.2](https://github.com/SheetJS/js-cfb) (Apache 2.0, lecture des fichiers .doc, .ppt et .xls) et
+[@pdf-lib/fontkit 1.1.1](https://github.com/Hopding/fontkit) (MIT) avec la police [Liberation Sans](https://github.com/liberationfonts) (SIL OFL 1.1,
+fournie avec pdf.js) pour le texte des PDF/A-2u et 2a, chargés seulement quand on les utilise — licences dans `www/vendor/`. Le profil de couleur sRGB du PDF/A
 est généré pour l'application à partir des valeurs publiques de la norme IEC 61966-2-1.

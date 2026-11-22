@@ -7,7 +7,7 @@
 (function () {
 "use strict";
 
-const APP_VERSION = "4.1.0";
+const APP_VERSION = "4.2.0";
 
 /* Lien de la page de don de l'association PROMEDNAV.
    À RENSEIGNER : tant qu'il est vide, le bouton « Faire un don » affiche
@@ -3195,9 +3195,11 @@ async function makeExport(fmt, baseName, opt) {
       return { files, info: files.length + " image" + (files.length > 1 ? "s " : " ") + ext.toUpperCase() + " · " + fmtMo(tot) };
     }
     if (fmt === "pdfa") {
-      const out = await buildPdfA(bytes, baseName);
+      const lv = opt.pdfaLevel || "a";
+      const out = await buildPdfA(bytes, baseName, lv);
       const blob = new Blob([out], { type: MIME.pdf });
-      return { files: [{ name: baseName + " (PDF-A).pdf", blob, type: MIME.pdf }], info: "PDF/A-2b · " + fmtMo(blob.size) };
+      return { files: [{ name: baseName + " (PDF-A-2" + lv + ").pdf", blob, type: MIME.pdf }],
+        info: "PDF/A-2" + lv + (lv !== "b" ? " · " + out.words + " mots sélectionnables" : "") + " · " + fmtMo(blob.size) };
     }
     if (fmt === "pptx") {
       const out = await buildPptx(bytes, baseName, opt.pptMode);
@@ -3491,44 +3493,136 @@ async function encryptPdf(bytes, password) {
   return doc.save({ useObjectStreams: false, addDefaultPage: false, updateFieldAppearances: false });
 }
 
-/* ===================================================== PDF/A-2b
-   Pages converties en images (aucune police à intégrer), profil de couleur
-   sRGB v2 généré pour l'application, métadonnées XMP déclarant PDF/A-2B. */
+/* ===================================================== PDF/A-2b, 2u et 2a
+   2b : image fidèle de chaque page, profil sRGB, métadonnées XMP.
+   2u : + couche de texte invisible, en Unicode, police Liberation Sans
+        intégrée (sous-ensemble) : texte sélectionnable et cherchable.
+   2a : + PDF balisé : paragraphes (P) dans un arbre de structure, langue
+        du document, image de page déclarée comme élément décoratif.     */
 const SRGB_ICC_B64 = "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";
-async function buildPdfA(bytes, title) {
-  const L = window.PDFLib;
+/* couche de texte : lignes regroupées en paragraphes, matrices en coordonnées de sortie */
+async function textLayer(bytes) {
+  const doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+  const pages = [];
+  try {
+    for (let i = 1; i <= doc.numPages; i++) {
+      const pg = await doc.getPage(i), vp = pg.getViewport({ scale: 1 }), ph = vp.height, tc = await pg.getTextContent();
+      const out = (x, y) => { const q = vp.convertToViewportPoint(x, y); return [q[0], ph - q[1]]; };
+      const items = [];
+      for (const it of tc.items) {
+        if (!it.str || !it.str.trim()) continue;
+        const [a, b, c, d, e, f] = it.transform;
+        const O = out(e, f), X = out(e + a, f + b), Y = out(e + c, f + d);
+        const top = vp.convertToViewportPoint(e, f);
+        items.push({ s: it.str, w: it.width || 0, m: [X[0] - O[0], X[1] - O[1], Y[0] - O[0], Y[1] - O[1], O[0], O[1]],
+                     y: top[1], x: top[0], h: Math.hypot(c, d) || 10 });
+      }
+      items.sort((p, q) => p.y - q.y || p.x - q.x);
+      const lines = [];
+      for (const it of items) {
+        const L0 = lines[lines.length - 1];
+        if (L0 && Math.abs(it.y - L0.y) < Math.max(it.h, L0.h) * 0.5) { L0.items.push(it); L0.h = Math.max(L0.h, it.h); }
+        else lines.push({ y: it.y, h: it.h, items: [it] });
+      }
+      const paras = [];
+      let prev = null;
+      for (const L0 of lines) {
+        L0.items.sort((p, q) => p.x - q.x);
+        const P = paras[paras.length - 1];
+        if (P && prev && L0.y - prev.y < Math.max(L0.h, prev.h) * 1.75 && Math.abs(L0.h - prev.h) < 2) P.items.push(...L0.items);
+        else paras.push({ items: L0.items.slice() });
+        prev = L0;
+      }
+      pages.push(paras);
+      pg.cleanup();
+    }
+  } finally { try { await doc.destroy(); } catch (e) {} }
+  return pages;
+}
+async function buildPdfA(bytes, title, level) {
+  level = level || "b";
+  const L = window.PDFLib, N = n => L.PDFName.of(n);
   const imgs = await renderPages(bytes.slice(0), 200, "jpg", (i, n) => busy(true, "PDF/A — page " + i + " sur " + n + "…"));
   const doc = await L.PDFDocument.create({ updateMetadata: false });
-  for (const im of imgs) {
+  const ctx = doc.context;
+  let font = null, charset = null, text = null;
+  if (level !== "b") {
+    busy(true, "PDF/A — couche de texte…");
+    await loadScript("vendor/fontkit.umd.min.js");
+    doc.registerFontkit(window.fontkit);
+    const ttf = new Uint8Array(await (await fetch("vendor/fonts/LiberationSans-Regular.ttf")).arrayBuffer());
+    font = await doc.embedFont(ttf, { subset: true });
+    charset = new Set(font.getCharacterSet());
+    text = await textLayer(bytes.slice(0));
+  }
+  const tagged = level === "a";
+  const rootRef = tagged ? ctx.nextRef() : null, docElRef = tagged ? ctx.nextRef() : null;
+  const allP = [], nums = [];
+  let words = 0;
+  for (let i = 0; i < imgs.length; i++) {
+    const im = imgs[i];
     const img = await doc.embedJpg(new Uint8Array(await im.blob.arrayBuffer()));
-    doc.addPage([im.pw, im.ph]).drawImage(img, { x: 0, y: 0, width: im.pw, height: im.ph });
+    const page = doc.addPage([im.pw, im.ph]);
+    if (level === "b") { page.drawImage(img, { x: 0, y: 0, width: im.pw, height: im.ph }); continue; }
+    const imName = page.node.newXObject("Im", img.ref), fName = page.node.newFontDictionary("F", font.ref);
+    let cs = (tagged ? "/Artifact BMC\n" : "") + "q " + im.pw + " 0 0 " + im.ph + " 0 0 cm " + imName + " Do Q\n" + (tagged ? "EMC\n" : "");
+    const pageP = [];
+    for (const para of (text[i] || [])) {
+      let body = "";
+      for (const it of para.items) {
+        const t = Array.from(it.s).filter(ch => charset.has(ch.codePointAt(0))).join("");
+        if (!t.trim()) continue;
+        const w1 = font.widthOfTextAtSize(t, 1), sx = Math.hypot(it.m[0], it.m[1]);
+        const tz = (w1 > 0 && sx > 0 && it.w > 0) ? clamp(it.w / (w1 * sx) * 100, 10, 1000) : 100;
+        body += "BT 3 Tr " + fName + " 1 Tf " + tz.toFixed(2) + " Tz " + it.m.map(v => (+v).toFixed(4)).join(" ") + " Tm " +
+          font.encodeText(t).toString() + " Tj ET\n";
+        words += t.trim().split(/\s+/).length;
+      }
+      if (!body) continue;
+      if (tagged) {
+        const mcid = pageP.length;
+        cs += "/P <</MCID " + mcid + ">> BDC\n" + body + "EMC\n";
+        const pRef = ctx.register(ctx.obj({ Type: "StructElem", S: "P", P: docElRef, Pg: page.ref, K: mcid }));
+        pageP.push(pRef); allP.push(pRef);
+      } else cs += body;
+    }
+    if (tagged && pageP.length) { page.node.set(N("StructParents"), L.PDFNumber.of(i)); nums.push(L.PDFNumber.of(i), ctx.obj(pageP)); }
+    page.node.set(N("Contents"), ctx.register(ctx.flateStream(new TextEncoder().encode(cs))));
+  }
+  if (tagged) {
+    ctx.assign(docElRef, ctx.obj({ Type: "StructElem", S: "Document", P: rootRef, K: allP }));
+    ctx.assign(rootRef, ctx.obj({ Type: "StructTreeRoot", K: docElRef, ParentTree: ctx.obj({ Nums: nums }), ParentTreeNextKey: imgs.length }));
+    doc.catalog.set(N("StructTreeRoot"), rootRef);
+    doc.catalog.set(N("MarkInfo"), ctx.obj({ Marked: true }));
+    doc.catalog.set(N("Lang"), L.PDFString.of("fr-FR"));
   }
   const now = new Date(); now.setMilliseconds(0);
   const iso = now.toISOString().replace(/\.\d+Z$/, "Z");
   doc.setTitle(title); doc.setProducer("LeSacAPDF"); doc.setCreator("LeSacAPDF");
   doc.setCreationDate(now); doc.setModificationDate(now);
-  const ctx = doc.context;
   const icc = Uint8Array.from(atob(SRGB_ICC_B64), c => c.charCodeAt(0));
   const iccRef = ctx.register(ctx.flateStream(icc, { N: 3 }));
   const oi = ctx.obj({ Type: "OutputIntent", S: "GTS_PDFA1", DestOutputProfile: iccRef });
-  oi.set(L.PDFName.of("OutputConditionIdentifier"), L.PDFString.of("sRGB IEC61966-2.1"));
-  oi.set(L.PDFName.of("Info"), L.PDFString.of("sRGB IEC61966-2.1"));
-  doc.catalog.set(L.PDFName.of("OutputIntents"), ctx.obj([ctx.register(oi)]));
+  oi.set(N("OutputConditionIdentifier"), L.PDFString.of("sRGB IEC61966-2.1"));
+  oi.set(N("Info"), L.PDFString.of("sRGB IEC61966-2.1"));
+  doc.catalog.set(N("OutputIntents"), ctx.obj([ctx.register(oi)]));
   const x = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
   const xmp = '<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>\n' +
     '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">' +
     '<rdf:Description rdf:about="" xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/" xmlns:dc="http://purl.org/dc/elements/1.1/" ' +
     'xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmlns:pdf="http://ns.adobe.com/pdf/1.3/">' +
-    '<pdfaid:part>2</pdfaid:part><pdfaid:conformance>B</pdfaid:conformance>' +
-    '<dc:format>application/pdf</dc:format><dc:title><rdf:Alt><rdf:li xml:lang="x-default">' + x(title) + '</rdf:li></rdf:Alt></dc:title>' +
-    '<xmp:CreatorTool>LeSacAPDF</xmp:CreatorTool><xmp:CreateDate>' + iso + '</xmp:CreateDate><xmp:ModifyDate>' + iso + '</xmp:ModifyDate>' +
-    '<xmp:MetadataDate>' + iso + '</xmp:MetadataDate><pdf:Producer>LeSacAPDF</pdf:Producer>' +
+    "<pdfaid:part>2</pdfaid:part><pdfaid:conformance>" + level.toUpperCase() + "</pdfaid:conformance>" +
+    '<dc:format>application/pdf</dc:format><dc:title><rdf:Alt><rdf:li xml:lang="x-default">' + x(title) + "</rdf:li></rdf:Alt></dc:title>" +
+    (tagged ? "<dc:language><rdf:Bag><rdf:li>fr-FR</rdf:li></rdf:Bag></dc:language>" : "") +
+    "<xmp:CreatorTool>LeSacAPDF</xmp:CreatorTool><xmp:CreateDate>" + iso + "</xmp:CreateDate><xmp:ModifyDate>" + iso + "</xmp:ModifyDate>" +
+    "<xmp:MetadataDate>" + iso + "</xmp:MetadataDate><pdf:Producer>LeSacAPDF</pdf:Producer>" +
     '</rdf:Description></rdf:RDF></x:xmpmeta>\n<?xpacket end="w"?>';
-  const meta = ctx.stream(new TextEncoder().encode(xmp), { Type: "Metadata", Subtype: "XML" });
-  doc.catalog.set(L.PDFName.of("Metadata"), ctx.register(meta));
+  doc.catalog.set(N("Metadata"), ctx.register(ctx.stream(new TextEncoder().encode(xmp), { Type: "Metadata", Subtype: "XML" })));
   const id = L.PDFHexString.of(Crypt.hex(Crypt.rnd(16)));
   ctx.trailerInfo.ID = ctx.obj([id, id]);
-  return doc.save({ useObjectStreams: false });
+  const saved = await doc.save({ useObjectStreams: false });
+  saved.words = words;
+  return saved;
 }
 
 /* ===================================================== PowerPoint (.pptx)
@@ -3982,7 +4076,7 @@ const Conv = {
         const f = files[fi], name = f.name || "", low = name.toLowerCase();
         busy(true, "Conversion de « " + name + " » (" + (fi + 1) + "/" + files.length + ")…");
         await yieldUI();
-        if (/\.(xls|rtf|pages|key|numbers)$/i.test(low)) { skipped.push(name + " (format non pris en charge)"); continue; }
+        if (/\.(rtf|pages|key|numbers)$/i.test(low)) { skipped.push(name + " (format non pris en charge)"); continue; }
         try {
           if (/^image\//.test(f.type) || /\.(jpe?g|png|gif|webp|bmp|heic|heif|avif)$/i.test(low)) {
             await Conv.image(out, f, fit);
@@ -3994,6 +4088,11 @@ const Conv = {
             await canvasesToPdf(out, await renderHtmlPages(body, css));
           } else if (/\.txt$/i.test(low) || f.type === "text/plain") {
             await canvasesToPdf(out, await renderHtmlPages('<pre style="white-space:pre-wrap;font:10.5pt/1.4 Consolas,monospace">' + xe(await f.text()) + "</pre>"));
+          } else if (/\.(xls|xlt)$/i.test(low)) {
+            await loadScript("vendor/cfb.min.js");
+            await sheetsToPdf(out, xlsModel(await f.arrayBuffer()), (i, n) => busy(true, "« " + name + " » : feuille " + i + " sur " + n + "…"));
+          } else if (/\.(xlsx|xlsm)$/i.test(low)) {
+            await sheetsToPdf(out, await xlsxModel(await f.arrayBuffer()), (i, n) => busy(true, "« " + name + " » : feuille " + i + " sur " + n + "…"));
           } else if (/\.(doc|dot)$/i.test(low)) {
             await loadScript("vendor/cfb.min.js");
             await canvasesToPdf(out, await renderHtmlPages(docToHtml(await f.arrayBuffer())));
@@ -4429,6 +4528,251 @@ async function pptToCanvases(buf, onSlide) {
   return { canvases: out, w: wPt, h: hPt };
 }
 
+/* =====================================================================
+   VERSION 4.2 — Excel vers PDF : ancien format .xls (BIFF8, [MS-XLS])
+   et format moderne .xlsx. Valeurs affichées comme dans Excel (dates,
+   pourcentages, euros, décimales), cellules fusionnées, une ou plusieurs
+   feuilles ; mise en forme (couleurs, bordures, polices) non reprise.
+   ===================================================================== */
+/* modèle commun : [{ name, cells: Map("r,c" -> {v, f}), merges: [[r1,c1,r2,c2]], maxR, maxC }] */
+const XlFmt = {
+  builtinDate: new Set([14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47]),
+  isDate(id, code) {
+    if (XlFmt.builtinDate.has(id)) return true;
+    if (!code) return false;
+    const c = code.replace(/"[^"]*"|\[[^\]]*\]|\\./g, "");
+    return /[dmyhs]/i.test(c) && !/^general$/i.test(c);
+  },
+  /* valeur numérique -> texte affiché */
+  show(v, id, code, d1904) {
+    if (typeof v !== "number") return v;
+    if (XlFmt.isDate(id, code)) {
+      const ms = Math.round((v + (d1904 ? 1462 : 0)) * 864e5) + Date.UTC(1899, 11, 30);
+      const d = new Date(ms), p2 = x => String(x).padStart(2, "0");
+      const date = p2(d.getUTCDate()) + "/" + p2(d.getUTCMonth() + 1) + "/" + d.getUTCFullYear();
+      const hasTime = /h|s/i.test((code || "").replace(/"[^"]*"/g, "")) || [18, 19, 20, 21, 22, 45, 46, 47].includes(id);
+      const time = p2(d.getUTCHours()) + ":" + p2(d.getUTCMinutes());
+      if (v < 1 && hasTime) return time;
+      return hasTime ? date + " " + time : date;
+    }
+    const c = code || "";
+    const pct = id === 9 || id === 10 || /%/.test(c.replace(/"[^"]*"/g, ""));
+    const m = /0\.(0+)/.exec(c);
+    let dec = m ? m[1].length : (id === 2 || id === 4 || id === 10 || id === 7 || id === 8 ? 2 : null);
+    const x = pct ? v * 100 : v;
+    let s;
+    if (dec !== null) s = x.toLocaleString("fr-FR", { minimumFractionDigits: dec, maximumFractionDigits: dec, useGrouping: /#,##|[34]$/.test(c) || id === 3 || id === 4 });
+    else s = parseFloat(x.toPrecision(12)).toLocaleString("fr-FR", { maximumFractionDigits: 10, useGrouping: false });
+    if (pct) s += " %";
+    if (/€/.test(c)) s += " €";
+    return s;
+  }
+};
+
+/* --- .xls (BIFF8) */
+function xlsModel(buf) {
+  const cfb = window.CFB.read(new Uint8Array(buf), { type: "array" });
+  const wb = cfbStream(cfb, "Workbook") || cfbStream(cfb, "Book");
+  if (!wb) throw new Error("fichier Excel 97-2003 non reconnu");
+  const rec = o => ({ type: u16(wb, o), len: u16(wb, o + 2), d: o + 4 });
+  const utf16 = new TextDecoder("utf-16le"), latin = new TextDecoder("windows-1252");
+  const f64 = (o) => new DataView(wb.buffer, wb.byteOffset + o, 8).getFloat64(0, true);
+  const rk = x => {
+    let v;
+    if (x & 2) v = x >> 2;
+    else { const b = new ArrayBuffer(8), dv = new DataView(b); dv.setUint32(4, x & 0xFFFFFFFC, true); v = dv.getFloat64(0, true); }
+    return (x & 1) ? v / 100 : v;
+  };
+  /* chaîne XLUnicodeString (longueur sur 1 ou 2 octets) */
+  const ustr = (o, wide) => {
+    const cch = wide ? u16(wb, o) : wb[o], fl = wb[o + (wide ? 2 : 1)], s = o + (wide ? 3 : 2);
+    return (fl & 1) ? utf16.decode(wb.subarray(s, s + cch * 2)) : latin.decode(wb.subarray(s, s + cch));
+  };
+  const sheets = [], xf = [], formats = {};
+  let sst = [], d1904 = false, o = 0;
+  /* globals : jusqu'au premier EOF */
+  while (o + 4 <= wb.length) {
+    const r = rec(o);
+    if (r.type === 0x002F) throw new Error("classeur protégé par mot de passe");
+    if (r.type === 0x0085) {
+      const vis = wb[r.d + 4], kind = wb[r.d + 5];
+      if (kind === 0) sheets.push({ pos: u32(wb, r.d), name: ustr(r.d + 6, false), hidden: vis !== 0 });
+    } else if (r.type === 0x041E) formats[u16(wb, r.d)] = ustr(r.d + 2, true);
+    else if (r.type === 0x00E0) xf.push(u16(wb, r.d + 2));
+    else if (r.type === 0x0022) d1904 = u16(wb, r.d) === 1;
+    else if (r.type === 0x00FC) {
+      /* table des chaînes partagées, répartie sur des enregistrements CONTINUE */
+      const segs = [[r.d + 8, r.d + r.len]];
+      let q = r.d + r.len;
+      while (q + 4 <= wb.length && u16(wb, q) === 0x003C) { const l = u16(wb, q + 2); segs.push([q + 4, q + 4 + l]); q += 4 + l; }
+      const total = u32(wb, r.d + 4);
+      let si = 0, pos = segs[0][0];
+      const need = n => { if (pos + n > segs[si][1] && si + 1 < segs.length && pos >= segs[si][1]) { si++; pos = segs[si][0]; } };
+      const byte = () => { if (pos >= segs[si][1]) { si++; pos = segs[si][0]; } return wb[pos++]; };
+      const skip = n => { while (n > 0) { if (pos >= segs[si][1]) { si++; pos = segs[si][0]; } const k = Math.min(n, segs[si][1] - pos); pos += k; n -= k; } };
+      for (let k = 0; k < total && si < segs.length; k++) {
+        need(3);
+        let cch = byte() | (byte() << 8), fl = byte(), runs = 0, ext = 0;
+        if (fl & 8) runs = byte() | (byte() << 8);
+        if (fl & 4) ext = byte() | (byte() << 8) | (byte() << 16) | (byte() << 24);
+        let s = "", wide = fl & 1;
+        while (cch > 0) {
+          if (pos >= segs[si][1]) { si++; pos = segs[si][0]; wide = wb[pos++] & 1; }   /* reprise : nouvel octet d'options */
+          const avail = Math.floor((segs[si][1] - pos) / (wide ? 2 : 1)), n = Math.min(cch, avail);
+          s += wide ? utf16.decode(wb.subarray(pos, pos + n * 2)) : latin.decode(wb.subarray(pos, pos + n));
+          pos += n * (wide ? 2 : 1); cch -= n;
+        }
+        skip(runs * 4 + ext);
+        sst.push(s);
+      }
+      o = q; continue;
+    } else if (r.type === 0x000A) break;
+    o += 4 + r.len;
+  }
+  const out = [];
+  for (const sh of sheets) {
+    if (sh.hidden) continue;
+    const cells = new Map(), merges = [];
+    let maxR = -1, maxC = -1, p = sh.pos, pendingStr = null;
+    const put = (r0, c0, v, xfi) => {
+      const id = xf[xfi] || 0;
+      const text = typeof v === "number" ? XlFmt.show(v, id, formats[id], d1904) : v;
+      if (text === "" || text == null) return;
+      cells.set(r0 + "," + c0, { v: text, num: typeof v === "number" });
+      if (r0 > maxR) maxR = r0; if (c0 > maxC) maxC = c0;
+    };
+    while (p + 4 <= wb.length) {
+      const r = rec(p), d = r.d;
+      if (r.type === 0x000A) break;
+      switch (r.type) {
+        case 0x00FD: put(u16(wb, d), u16(wb, d + 2), sst[u32(wb, d + 6)], u16(wb, d + 4)); break;
+        case 0x0204: case 0x00D6: put(u16(wb, d), u16(wb, d + 2), ustr(d + 6, true), u16(wb, d + 4)); break;
+        case 0x0203: put(u16(wb, d), u16(wb, d + 2), f64(d + 6), u16(wb, d + 4)); break;
+        case 0x027E: put(u16(wb, d), u16(wb, d + 2), rk(u32(wb, d + 6)), u16(wb, d + 4)); break;
+        case 0x00BD: {
+          const row = u16(wb, d), c1 = u16(wb, d + 2), n = (r.len - 6) / 6;
+          for (let k = 0; k < n; k++) put(row, c1 + k, rk(u32(wb, d + 6 + k * 6)), u16(wb, d + 4 + k * 6));
+          break;
+        }
+        case 0x0006: {
+          const row = u16(wb, d), col = u16(wb, d + 2), x = u16(wb, d + 4);
+          if (u16(wb, d + 12) === 0xFFFF) {
+            const t = wb[d + 6];
+            if (t === 0) pendingStr = { row, col, x };
+            else if (t === 1) put(row, col, wb[d + 8] ? "VRAI" : "FAUX", x);
+            else if (t === 2) put(row, col, "#ERREUR", x);
+          } else put(row, col, f64(d + 6), x);
+          break;
+        }
+        case 0x0207: if (pendingStr) { put(pendingStr.row, pendingStr.col, ustr(d, true), pendingStr.x); pendingStr = null; } break;
+        case 0x0205: {
+          const v = wb[d + 6], isErr = wb[d + 7];
+          put(u16(wb, d), u16(wb, d + 2), isErr ? "#ERREUR" : (v ? "VRAI" : "FAUX"), u16(wb, d + 4));
+          break;
+        }
+        case 0x00E5: {
+          const n = u16(wb, d);
+          for (let k = 0; k < n; k++) { const q = d + 2 + k * 8; merges.push([u16(wb, q), u16(wb, q + 4), u16(wb, q + 2), u16(wb, q + 6)]); }
+          break;
+        }
+      }
+      p += 4 + r.len;
+    }
+    out.push({ name: sh.name, cells, merges, maxR, maxC });
+  }
+  return out;
+}
+
+/* --- .xlsx */
+async function xlsxModel(buf) {
+  const z = await unzip(buf);
+  const wbx = xmlDoc(await z.text("xl/workbook.xml"));
+  const d1904 = Array.from(wbx.getElementsByTagNameNS("*", "workbookPr")).some(e => /^(1|true)$/.test(e.getAttribute("date1904") || ""));
+  const rels = {};
+  const rx = await z.text("xl/_rels/workbook.xml.rels");
+  if (rx) xmlDoc(rx).querySelectorAll("Relationship").forEach(e => { const t = e.getAttribute("Target"); rels[e.getAttribute("Id")] = t.startsWith("/") ? t.slice(1) : "xl/" + t; });
+  const sst = [];
+  const sx = await z.text("xl/sharedStrings.xml");
+  if (sx) for (const si of xmlDoc(sx).getElementsByTagNameNS("*", "si")) sst.push(Array.from(si.getElementsByTagNameNS("*", "t")).filter(t => t.parentNode.localName !== "rPh").map(t => t.textContent).join(""));
+  const numFmts = {}, xfs = [];
+  const st = await z.text("xl/styles.xml");
+  if (st) {
+    const sd = xmlDoc(st);
+    for (const n of sd.getElementsByTagNameNS("*", "numFmt")) numFmts[+n.getAttribute("numFmtId")] = n.getAttribute("formatCode");
+    const cx = sd.getElementsByTagNameNS("*", "cellXfs")[0];
+    if (cx) for (const x of kids(cx, "xf")) xfs.push(+(x.getAttribute("numFmtId") || 0));
+  }
+  const RNS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+  const out = [];
+  for (const s of wbx.getElementsByTagNameNS("*", "sheet")) {
+    if (/hidden/i.test(s.getAttribute("state") || "")) continue;
+    const path = rels[s.getAttributeNS(RNS, "id")]; if (!path) continue;
+    const x = xmlDoc(await z.text(path));
+    const cells = new Map(), merges = [];
+    let maxR = -1, maxC = -1;
+    const pos = ref => { const m = /^([A-Z]+)(\d+)$/.exec(ref || ""); if (!m) return null; let c = 0; for (const ch of m[1]) c = c * 26 + ch.charCodeAt(0) - 64; return [+m[2] - 1, c - 1]; };
+    for (const c of x.getElementsByTagNameNS("*", "c")) {
+      const p = pos(c.getAttribute("r")); if (!p) continue;
+      const t = c.getAttribute("t"), vEl = kids(c, "v")[0], v = vEl ? vEl.textContent : null;
+      let val = null, isNum = false;
+      if (t === "s") val = v !== null ? sst[+v] : null;
+      else if (t === "inlineStr") val = Array.from(c.getElementsByTagNameNS("*", "t")).map(e => e.textContent).join("");
+      else if (t === "str") val = v;
+      else if (t === "b") val = v === "1" ? "VRAI" : "FAUX";
+      else if (t === "e") val = v;
+      else if (v !== null && v !== "") {
+        const id = xfs[+(c.getAttribute("s") || 0)] || 0;
+        val = XlFmt.show(parseFloat(v), id, numFmts[id], d1904); isNum = true;
+      }
+      if (val === null || val === "") continue;
+      cells.set(p[0] + "," + p[1], { v: val, num: isNum });
+      if (p[0] > maxR) maxR = p[0]; if (p[1] > maxC) maxC = p[1];
+    }
+    for (const mc of x.getElementsByTagNameNS("*", "mergeCell")) {
+      const [a, b] = (mc.getAttribute("ref") || "").split(":"), pa = pos(a), pb = pos(b);
+      if (pa && pb) merges.push([pa[0], pb[0], pa[1], pb[1]]);
+    }
+    out.push({ name: s.getAttribute("name"), cells, merges, maxR, maxC });
+  }
+  return out;
+}
+
+/* --- rendu : une section par feuille, paysage si le tableau est large */
+async function sheetsToPdf(doc, sheets, onSheet) {
+  const MAXR = 3000;
+  let any = false;
+  for (let i = 0; i < sheets.length; i++) {
+    const sh = sheets[i];
+    if (onSheet) onSheet(i + 1, sheets.length);
+    if (sh.maxR < 0) continue;
+    any = true;
+    const rows = Math.min(sh.maxR, MAXR - 1), cover = new Set(), span = {};
+    for (const [r1, r2, c1, c2] of sh.merges) {
+      span[r1 + "," + c1] = [r2 - r1 + 1, c2 - c1 + 1];
+      for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) if (r !== r1 || c !== c1) cover.add(r + "," + c);
+    }
+    let html = "<h2>" + xe(sh.name) + "</h2><table class=\"xl\">";
+    for (let r = 0; r <= rows; r++) {
+      html += "<tr>";
+      for (let c = 0; c <= sh.maxC; c++) {
+        const k = r + "," + c; if (cover.has(k)) continue;
+        const cell = sh.cells.get(k), sp = span[k];
+        html += "<td" + (sp ? ' rowspan="' + sp[0] + '" colspan="' + sp[1] + '"' : "") + (cell && cell.num ? ' class="n"' : "") + ">" +
+          (cell ? xe(String(cell.v)) : "") + "</td>";
+      }
+      html += "</tr>";
+    }
+    html += "</table>" + (sh.maxR >= MAXR ? "<p><i>Feuille tronquée aux " + MAXR + " premières lignes.</i></p>" : "");
+    const land = sh.maxC > 5;
+    const css = "<style>h2{font-size:13pt;margin:0 0 8px;color:#1B3558}table.xl{border-collapse:collapse;font-size:9pt}" +
+      "table.xl td{border:1px solid #c5ccd6;padding:3px 6px;vertical-align:top;word-break:break-word}table.xl td.n{text-align:right}" +
+      "body{padding:40px 36px !important}</style>";
+    const canv = await renderHtmlPages(html, css, land ? { pxW: 1123, pxH: 794 } : {});
+    await canvasesToPdf(doc, canv, land ? A4.h : A4.w, land ? A4.w : A4.h);
+  }
+  if (!any) throw new Error("classeur vide");
+}
+
 /* ------------------------------------------------- branchements de la v4 */
 function initV4() {
   /* filigrane */
@@ -4800,7 +5144,8 @@ function init() {
       try {
         const r = await makeExport(fmt, base, {
           imgType: $$('input[name=imgType]').find(x => x.checked).value, dpi: +$("#imgDpi").value,
-          withImages: $("#txtImages").checked, pptMode: $$('input[name=pptMode]').find(x => x.checked).value });
+          withImages: $("#txtImages").checked, pptMode: $$('input[name=pptMode]').find(x => x.checked).value,
+          pdfaLevel: $$('input[name=pdfaLevel]').find(x => x.checked).value });
         S.out = { files: r.files, name: r.files.length > 1 ? base + " - images.zip" : r.files[0].name };
         $("#doneName").textContent = r.files.length > 1 ? r.files.length + " images · " + base : r.files[0].name;
         $("#doneInfo").textContent = "Prêt · " + r.info;

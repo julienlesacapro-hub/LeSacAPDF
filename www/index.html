@@ -359,8 +359,16 @@
       <p class="sub">Une image par page. Plusieurs pages : partagées ensemble, ou téléchargées dans un fichier ZIP.</p>
     </div>
     <div id="pdfaOpts" hidden>
-      <p class="sub">PDF/A-2b, format d'archivage à long terme. Les pages sont enregistrées en images (fidèles à l'écran),
-        avec un profil de couleur sRGB intégré : le texte n'est donc plus sélectionnable. Le PDF/A ne peut pas être protégé par mot de passe.</p>
+      <div class="opts">
+        <label class="opt"><input type="radio" name="pdfaLevel" value="a" checked>
+          <span><b>PDF/A-2a — accessible (recommandé)</b><small>Texte sélectionnable et cherchable, document balisé (paragraphes, langue) pour les lecteurs d'écran. Satisfait aussi 2u et 2b.</small></span></label>
+        <label class="opt"><input type="radio" name="pdfaLevel" value="u">
+          <span><b>PDF/A-2u — texte Unicode</b><small>Texte sélectionnable et cherchable, sans balisage.</small></span></label>
+        <label class="opt"><input type="radio" name="pdfaLevel" value="b">
+          <span><b>PDF/A-2b — apparence seule</b><small>Pages en images, texte non sélectionnable. Fichier le plus simple.</small></span></label>
+      </div>
+      <p class="sub">Format d'archivage à long terme : l'apparence de chaque page est conservée en image, avec un profil de couleur sRGB intégré ;
+        pour 2u et 2a, le texte est ajouté en couche invisible (police Liberation Sans intégrée). Un PDF/A ne peut pas être protégé par mot de passe.</p>
     </div>
     <div id="pptOpts" hidden>
       <div class="opts two">
@@ -453,7 +461,7 @@
     <dt>Mot de passe</dt><dd>Enregistrer → PDF → « Protéger par un mot de passe » : chiffrement AES-256. Sans le mot de passe,
       le document ne peut plus être ouvert.</dd>
     <dt>Autres formats</dt><dd>PDF/A (archivage), image, Word, ODT, PowerPoint, Excel, texte.</dd>
-    <dt>Convertir en PDF</dt><dd>Images, Word (.docx, .doc), ODT, PowerPoint (.pptx, .ppt), pages web, texte : réunis dans un seul PDF.
+    <dt>Convertir en PDF</dt><dd>Images, Word (.docx, .doc), ODT, PowerPoint (.pptx, .ppt), Excel (.xlsx, .xls), pages web, texte : réunis dans un seul PDF.
       Pour .doc et .ppt, seuls le texte et sa structure sont repris.</dd>
     <dt>Comparer</dt><dd>Menu ⋮ → Comparer : les deux PDF côte à côte, lignes modifiées surlignées (rouge : version A, vert :
       version B), ou mode visuel pour les documents scannés.</dd>
@@ -529,12 +537,14 @@
   <div class="grab"></div>
   <h2>Convertir en PDF</h2>
   <p class="sub">Images (JPG, PNG, WebP…), Word (.docx et ancien .doc), OpenDocument (.odt), PowerPoint (.pptx et ancien .ppt),
-    pages web (.html), texte (.txt) ou PDF. Plusieurs fichiers sont réunis dans un seul PDF, dans l'ordre choisi.</p>
+    Excel (.xlsx et ancien .xls), pages web (.html), texte (.txt) ou PDF. Plusieurs fichiers sont réunis dans un seul PDF, dans l'ordre choisi.</p>
   <label class="field-l">Taille des pages pour les images
     <select id="convFit"><option value="a4">A4, image ajustée (marges)</option><option value="image">Taille de l'image</option></select></label>
   <p class="sub">Les documents Word, ODT, PowerPoint et HTML sont mis en page puis enregistrés en images : le texte n'est pas
     sélectionnable et la mise en page peut différer légèrement de l'original. Pour les anciens formats .doc et .ppt (Office 97-2003),
-    seuls le texte et sa structure sont repris (paragraphes, tableaux, diapositives), sans les images ni la mise en forme.</p>
+    seuls le texte et sa structure sont repris (paragraphes, tableaux, diapositives), sans les images ni la mise en forme.
+    Pour Excel, chaque feuille visible devient un tableau avec les valeurs affichées (dates, montants, pourcentages, formules calculées),
+    sans les couleurs ni les bordures d'origine.</p>
   <button class="primary wide" id="convPick"><svg><use href="#i-open"/></svg>Choisir des fichiers</button>
 </section>
 
@@ -644,7 +654,7 @@
 
 <input type="file" id="filePdf" accept="application/pdf,.pdf" hidden>
 <input type="file" id="fileWm" accept="image/*" hidden>
-<input type="file" id="fileConv" accept="image/*,.pdf,.docx,.doc,.dot,.odt,.pptx,.ppt,.pps,.pot,.html,.htm,.txt,application/pdf" multiple hidden>
+<input type="file" id="fileConv" accept="image/*,.pdf,.docx,.doc,.dot,.odt,.pptx,.ppt,.pps,.pot,.xlsx,.xlsm,.xls,.xlt,.html,.htm,.txt,application/pdf" multiple hidden>
 <input type="file" id="fileCmp" accept="application/pdf,.pdf" hidden>
 <input type="file" id="fileMerge" accept="application/pdf,.pdf" multiple hidden>
 <input type="file" id="fileScan" accept="image/*" capture="environment" hidden>
