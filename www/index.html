@@ -60,6 +60,11 @@
     <symbol id="i-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="m7.5 12.5 3 3 6-6.5"/></symbol>
     <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.4-9.2-9.3C1.7 8 3.6 4.5 7.1 4.5c2 0 3.4 1.1 4.9 2.9 1.5-1.8 2.9-2.9 4.9-2.9 3.5 0 5.4 3.5 4.3 6.7-1.7 4.9-9.2 9.3-9.2 9.3z"/></symbol>
     <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 3.5h11l3.5 3.5v12a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 19V5A1.5 1.5 0 0 1 6 3.5z"/><path d="M8 3.5v5h7v-5"/><rect x="7.5" y="13" width="9" height="7.5" rx="1"/></symbol>
+    <symbol id="i-redact" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="10" rx="1.5" fill="currentColor" stroke="none"/><path d="M3 4h7M14 4h7M3 20h5M12 20h9"/></symbol>
+    <symbol id="i-wm" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 15.5 15.5 8" stroke-dasharray="2 2.2"/><path d="M8 9.5l2-1M14 15.5l2-1" opacity=".5"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 8-8M16 7l2.5 2.5M14 9l2 2"/></symbol>
+    <symbol id="i-compare" viewBox="0 0 24 24"><rect x="3" y="4" width="7.5" height="16" rx="1.5"/><rect x="13.5" y="4" width="7.5" height="16" rx="1.5"/><path d="M6 9h2M6 12h2.5M16 9h2.5M16 12h2" /></symbol>
+    <symbol id="i-convert" viewBox="0 0 24 24"><path d="M4 7h12l-3-3M20 17H8l3 3"/></symbol>
     <symbol id="i-print" viewBox="0 0 24 24"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
     <symbol id="i-stamp" viewBox="0 0 24 24"><path d="M9.5 3.5h5l-1 7h4a2 2 0 0 1 2 2v3H4.5v-3a2 2 0 0 1 2-2h4z"/><path d="M5 19.5h14"/></symbol>
@@ -105,6 +110,7 @@
     <span id="searchCount"></span>
     <button class="ib" id="searchPrev" aria-label="Précédent"><svg><use href="#i-up"/></svg></button>
     <button class="ib" id="searchNext" aria-label="Suivant"><svg><use href="#i-dn"/></svg></button>
+    <button class="ib" id="searchRedact" aria-label="Censurer les résultats" title="Censurer tous les résultats"><svg><use href="#i-redact"/></svg></button>
     <button class="ib" id="searchClose" aria-label="Fermer"><svg><use href="#i-close"/></svg></button>
   </div>
 
@@ -118,6 +124,7 @@
       <div class="home-actions">
         <button id="btnScanHome"><svg><use href="#i-camera"/></svg>Scanner</button>
         <button id="btnMergeHome"><svg><use href="#i-merge"/></svg>Fusionner</button>
+        <button id="btnConvHome"><svg><use href="#i-convert"/></svg>Convertir</button>
       </div>
       <section class="don-card" id="donCard" aria-label="Faire un don">
         <h3><svg><use href="#i-heart"/></svg>Soutenez l'association PROMEDNAV</h3>
@@ -171,6 +178,8 @@
       <button class="tool" data-tool="pen"><svg><use href="#i-pen"/></svg><span>Stylo</span></button>
       <button class="tool" data-tool="marker"><svg><use href="#i-marker"/></svg><span>Surligner</span></button>
       <button class="tool" data-tool="mask"><svg><use href="#i-mask"/></svg><span>Masquer</span></button>
+      <button class="tool" data-tool="redact"><svg><use href="#i-redact"/></svg><span>Censurer</span></button>
+      <button class="tool" data-act="wm"><svg><use href="#i-wm"/></svg><span>Filigrane</span></button>
       <button class="tool" data-act="image"><svg><use href="#i-image"/></svg><span>Image</span></button>
       <button class="tool" data-act="snips"><svg><use href="#i-snip"/></svg><span>Mes textes</span></button>
     </div>
@@ -191,6 +200,11 @@
     <button data-m="organize" class="needdoc"><svg><use href="#i-grid"/></svg>Organiser les pages <small>supprimer, déplacer, pivoter…</small></button>
     <button data-m="split" class="needdoc"><svg><use href="#i-split"/></svg>Scinder <small>extraire des pages</small></button>
     <button data-m="merge"><svg><use href="#i-merge"/></svg>Fusionner des PDF</button>
+    <button data-m="convert"><svg><use href="#i-convert"/></svg>Convertir en PDF <small>image, Word, ODT, PowerPoint, HTML</small></button>
+    <button data-m="compare" class="needdoc"><svg><use href="#i-compare"/></svg>Comparer avec un autre PDF</button>
+    <button data-m="wm" class="needdoc"><svg><use href="#i-wm"/></svg>Filigrane</button>
+    <button data-m="redact" class="needdoc"><svg><use href="#i-redact"/></svg>Censurer définitivement</button>
+    <button data-m="encrypt" class="needdoc"><svg><use href="#i-key"/></svg>Protéger par mot de passe</button>
     <button data-m="search" class="needdoc"><svg><use href="#i-search"/></svg>Rechercher dans le document</button>
     <button data-m="print" class="needdoc"><svg><use href="#i-print"/></svg>Imprimer</button>
     <hr>
@@ -321,9 +335,12 @@
     <div class="field-l" style="margin-bottom:6px">Format</div>
     <div class="seg fmt" id="saveFmt">
       <button data-f="pdf" class="on">PDF</button>
+      <button data-f="pdfa">PDF/A</button>
       <button data-f="img">Image</button>
       <button data-f="docx">Word</button>
       <button data-f="odt">ODT</button>
+      <button data-f="pptx">PowerPoint</button>
+      <button data-f="xlsx">Excel</button>
       <button data-f="txt">Texte</button>
     </div>
     <div id="imgOpts" hidden>
@@ -340,6 +357,32 @@
           <option value="300">Impression (300 ppp)</option>
         </select></label>
       <p class="sub">Une image par page. Plusieurs pages : partagées ensemble, ou téléchargées dans un fichier ZIP.</p>
+    </div>
+    <div id="pdfaOpts" hidden>
+      <div class="opts">
+        <label class="opt"><input type="radio" name="pdfaLevel" value="a" checked>
+          <span><b>PDF/A-2a — accessible (recommandé)</b><small>Texte sélectionnable et cherchable, document balisé (paragraphes, langue) pour les lecteurs d'écran. Satisfait aussi 2u et 2b.</small></span></label>
+        <label class="opt"><input type="radio" name="pdfaLevel" value="u">
+          <span><b>PDF/A-2u — texte Unicode</b><small>Texte sélectionnable et cherchable, sans balisage.</small></span></label>
+        <label class="opt"><input type="radio" name="pdfaLevel" value="b">
+          <span><b>PDF/A-2b — apparence seule</b><small>Pages en images, texte non sélectionnable. Fichier le plus simple.</small></span></label>
+      </div>
+      <p class="sub">Format d'archivage à long terme : l'apparence de chaque page est conservée en image, avec un profil de couleur sRGB intégré ;
+        pour 2u et 2a, le texte est ajouté en couche invisible (police Liberation Sans intégrée). Un PDF/A ne peut pas être protégé par mot de passe.</p>
+    </div>
+    <div id="pptOpts" hidden>
+      <div class="opts two">
+        <label class="opt"><input type="radio" name="pptMode" value="image" checked>
+          <span><b>Image fidèle</b><small>Chaque page en diapositive, à l'identique</small></span></label>
+        <label class="opt"><input type="radio" name="pptMode" value="text">
+          <span><b>Texte modifiable</b><small>Le texte de la page dans une zone de texte</small></span></label>
+      </div>
+      <p class="sub">Format PowerPoint moderne (.pptx), lisible par PowerPoint, Keynote, Google Slides et LibreOffice.
+        L'ancien format .ppt n'est pas proposé.</p>
+    </div>
+    <div id="xlsxOpts" hidden>
+      <p class="sub">Une feuille par page. Le texte est réparti en lignes et en colonnes selon sa position ; les nombres
+        (« 1 234,56 », « 12 % ») deviennent de vrais nombres. Fiable pour les tableaux simples, approximatif pour les mises en page complexes.</p>
     </div>
     <div id="txtOpts" hidden>
       <p class="sub" id="txtHint">Le texte du PDF est extrait et peut être modifié ; la mise en page d'origine
@@ -358,6 +401,12 @@
         <input type="number" id="saveTarget" min="0.3" max="200" step="0.5" value="5" inputmode="decimal"> Mo</label>
       <label class="chk"><input type="checkbox" id="saveGray"> Niveaux de gris (plus net à taille égale)</label>
     </div>
+    </div>
+    <label class="chk" id="encRow"><input type="checkbox" id="encOn"> Protéger par un mot de passe (chiffrement AES-256)</label>
+    <div id="encBox" hidden>
+      <label class="field-l">Mot de passe<input type="password" id="encPwd" autocomplete="new-password"></label>
+      <label class="field-l">Confirmer le mot de passe<input type="password" id="encPwd2" autocomplete="new-password"></label>
+      <p class="sub">Notez-le bien : sans lui, le document ne pourra plus être ouvert, et personne ne pourra le récupérer.</p>
     </div>
     <label class="chk" id="flatRow" hidden><input type="checkbox" id="chkFlatten" checked>
       Verrouiller les champs du formulaire</label>
@@ -404,6 +453,18 @@
       extraire en un nouveau PDF, ou ajouter les pages d'autres PDF.</dd>
     <dt>Scanner</dt><dd>Photographiez une feuille : ses bords sont détectés, la page est redressée et le fond blanchi.
       Ajoutez autant de pages que nécessaire.</dd>
+    <dt>Filigrane</dt><dd>Outil <b>Filigrane</b> : un texte (PROJET, CONFIDENTIEL, « Usage exclusivement destiné à la
+      location »…) ou une image, avec l'emplacement, la transparence, la police et la couleur de votre choix.</dd>
+    <dt>Censurer définitivement</dt><dd>Outil <b>Censurer</b> : tracez des rectangles noirs, ou utilisez le bouton de censure de la
+      recherche pour noircir toutes les occurrences d'un mot. À l'enregistrement, la page concernée devient une image : le contenu caché
+      est réellement supprimé, pas seulement recouvert.</dd>
+    <dt>Mot de passe</dt><dd>Enregistrer → PDF → « Protéger par un mot de passe » : chiffrement AES-256. Sans le mot de passe,
+      le document ne peut plus être ouvert.</dd>
+    <dt>Autres formats</dt><dd>PDF/A (archivage), image, Word, ODT, PowerPoint, Excel, texte.</dd>
+    <dt>Convertir en PDF</dt><dd>Images, Word (.docx, .doc), ODT, PowerPoint (.pptx, .ppt), Excel (.xlsx, .xls), pages web, texte : réunis dans un seul PDF.
+      Pour .doc et .ppt, seuls le texte et sa structure sont repris.</dd>
+    <dt>Comparer</dt><dd>Menu ⋮ → Comparer : les deux PDF côte à côte, lignes modifiées surlignées (rouge : version A, vert :
+      version B), ou mode visuel pour les documents scannés.</dd>
     <dt>Imprimer</dt><dd>Menu ⋮ → Imprimer : la fenêtre d'impression du téléphone s'ouvre (AirPrint, Mopria…).</dd>
     <dt>Documents récents</dt><dd>Les 10 derniers PDF ouverts ou créés restent sur l'accueil, conservés sur l'appareil.</dd>
     <dt>Zoomer</dt><dd>Écartez deux doigts sur le document.</dd>
@@ -434,6 +495,57 @@
     et améliorer l'image, puis ajouter d'autres pages.</p>
   <button class="primary wide" id="scCam"><svg><use href="#i-camera"/></svg>Prendre une photo</button>
   <button class="wide" id="scGal"><svg><use href="#i-image"/></svg>Choisir dans la galerie</button>
+</section>
+
+<!-- filigrane -->
+<section class="sheet tall" id="shWm" aria-label="Filigrane">
+  <div class="grab"></div>
+  <h2>Filigrane</h2>
+  <p class="sub">Un texte ou une image appliqué en transparence sur les pages. L'aperçu se met à jour sur le document.</p>
+  <div class="seg" id="wmType"><button data-t="text" class="on">Texte</button><button data-t="image">Image</button></div>
+  <div class="pane on" data-pane="text">
+    <div class="wmpresets" id="wmPresets"></div>
+    <label class="field-l">Texte<input type="text" id="wmText" autocomplete="off"></label>
+    <div class="row">
+      <label class="field-l inline" style="margin:0">Police
+        <select id="wmFont"><option value="Helvetica">Helvetica</option><option value="Times">Times</option><option value="Courier">Courier</option></select></label>
+      <label class="chk" style="margin:0"><input type="checkbox" id="wmBold"> Gras</label>
+    </div>
+    <div class="row"><span class="field-l" style="margin:0">Couleur</span><div class="swatches" id="wmColors"></div></div>
+    <label class="rng full">Taille <input type="range" id="wmSize" min="10" max="150" value="60"><output id="wmSizeV"></output></label>
+    <label class="chk"><input type="checkbox" id="wmFit"> Ajuster automatiquement à la page</label>
+  </div>
+  <div class="pane" data-pane="image">
+    <button class="wide" id="wmPick"><svg><use href="#i-image"/></svg>Choisir une image (logo, tampon…)</button>
+    <img id="wmImgPrev" alt="">
+    <label class="rng full">Largeur <input type="range" id="wmScale" min="10" max="100" value="50"></label>
+  </div>
+  <label class="field-l">Emplacement
+    <select id="wmPos"><option value="diag">Diagonale</option><option value="center">Centre</option><option value="top">En haut</option>
+      <option value="bottom">En bas</option><option value="tile">Mosaïque (toute la page)</option></select></label>
+  <label class="rng full">Transparence <input type="range" id="wmOpacity" min="5" max="100" value="25"><output id="wmOpacityV"></output></label>
+  <label class="field-l">Pages
+    <select id="wmPages"><option value="all">Toutes les pages</option><option value="first">Première page seulement</option></select></label>
+  <div class="actions">
+    <button class="ghost danger" id="wmRemove">Retirer</button>
+    <button class="primary" id="wmApply">Appliquer</button>
+  </div>
+</section>
+
+<!-- conversion vers PDF -->
+<section class="sheet" id="shConv" aria-label="Convertir en PDF">
+  <div class="grab"></div>
+  <h2>Convertir en PDF</h2>
+  <p class="sub">Images (JPG, PNG, WebP…), Word (.docx et ancien .doc), OpenDocument (.odt), PowerPoint (.pptx et ancien .ppt),
+    Excel (.xlsx et ancien .xls), pages web (.html), texte (.txt) ou PDF. Plusieurs fichiers sont réunis dans un seul PDF, dans l'ordre choisi.</p>
+  <label class="field-l">Taille des pages pour les images
+    <select id="convFit"><option value="a4">A4, image ajustée (marges)</option><option value="image">Taille de l'image</option></select></label>
+  <p class="sub">Les documents Word, ODT, PowerPoint et HTML sont mis en page puis enregistrés en images : le texte n'est pas
+    sélectionnable et la mise en page peut différer légèrement de l'original. Pour les anciens formats .doc et .ppt (Office 97-2003),
+    seuls le texte et sa structure sont repris (paragraphes, tableaux, diapositives), sans les images ni la mise en forme.
+    Pour Excel, chaque feuille visible devient un tableau avec les valeurs affichées (dates, montants, pourcentages, formules calculées),
+    sans les couleurs ni les bordures d'origine.</p>
+  <button class="primary wide" id="convPick"><svg><use href="#i-open"/></svg>Choisir des fichiers</button>
 </section>
 
 <!-- documents récents -->
@@ -521,9 +633,29 @@
   </div>
 </section>
 
+<!-- comparaison -->
+<section class="panel" id="pnCmp" aria-label="Comparer">
+  <header class="pbar">
+    <button class="ib" data-pclose aria-label="Fermer"><svg><use href="#i-close"/></svg></button>
+    <div class="ptitle"><b id="cmpTitle">Comparer</b><small id="cmpSub"></small></div>
+    <button class="pill" id="cmpPick"><svg><use href="#i-open"/></svg>B</button>
+  </header>
+  <div class="cmpbar" id="cmpBar" hidden>
+    <div class="seg" id="cmpMode"><button data-m="text" class="on">Texte</button><button data-m="visual">Visuel</button></div>
+    <span id="cmpCount"></span>
+    <button class="ib" id="cmpPrev" aria-label="Différence précédente"><svg><use href="#i-up"/></svg></button>
+    <button class="ib" id="cmpNext" aria-label="Différence suivante"><svg><use href="#i-dn"/></svg></button>
+  </div>
+  <div class="cmplegend"><span class="del">A : supprimé ou modifié</span><span class="add">B : ajouté ou modifié</span></div>
+  <div class="cmpbody" id="cmpBody"></div>
+</section>
+
 <div id="printArea" aria-hidden="true"></div>
 
 <input type="file" id="filePdf" accept="application/pdf,.pdf" hidden>
+<input type="file" id="fileWm" accept="image/*" hidden>
+<input type="file" id="fileConv" accept="image/*,.pdf,.docx,.doc,.dot,.odt,.pptx,.ppt,.pps,.pot,.xlsx,.xlsm,.xls,.xlt,.html,.htm,.txt,application/pdf" multiple hidden>
+<input type="file" id="fileCmp" accept="application/pdf,.pdf" hidden>
 <input type="file" id="fileMerge" accept="application/pdf,.pdf" multiple hidden>
 <input type="file" id="fileScan" accept="image/*" capture="environment" hidden>
 <input type="file" id="fileScanGal" accept="image/*" multiple hidden>

@@ -1,0 +1,8 @@
+@pdf-lib/fontkit 1.1.1 — fichier dist/fontkit.umd.min.js
+Licence déclarée par le paquet (package.json, champ "license") : MIT
+Dépôt : https://github.com/Hopding/fontkit (dérivé de foliojs/fontkit, MIT)
+Le paquet npm ne contient pas de fichier de licence séparé ; le texte de la
+licence MIT s'applique : permission accordée, gratuitement, d'utiliser, copier,
+modifier, fusionner, publier, distribuer, sous-licencier et vendre le logiciel,
+sous réserve d'inclure l'avis de copyright et cet avis de permission ; logiciel
+fourni « tel quel », sans garantie.
