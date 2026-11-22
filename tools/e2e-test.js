@@ -91,7 +91,8 @@ const ok = (c, m) => { if (!c) throw new Error("ÉCHEC : " + m); console.log("�
   // annuler / rétablir
   await p.locator("#btnUndo").tap();
   ok(await p.locator(".item.stroke").count() === 0, "annuler");
-  await p.locator("#btnRedo").tap();
+  if (await p.locator("#btnRedo").isVisible()) await p.locator("#btnRedo").tap();
+  else { await p.locator("#btnMenu").tap(); await p.waitForTimeout(300); await p.locator('#shMenu [data-m=redo]').tap(); }   // écran étroit : « Rétablir » est dans le menu
   ok(await p.locator(".item.stroke").count() === 1, "rétablir");
 
   // menu + pages

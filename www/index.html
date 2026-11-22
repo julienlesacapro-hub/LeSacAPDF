@@ -59,6 +59,7 @@
     <symbol id="i-backup" viewBox="0 0 24 24"><path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></symbol>
     <symbol id="i-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="m7.5 12.5 3 3 6-6.5"/></symbol>
     <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.4-9.2-9.3C1.7 8 3.6 4.5 7.1 4.5c2 0 3.4 1.1 4.9 2.9 1.5-1.8 2.9-2.9 4.9-2.9 3.5 0 5.4 3.5 4.3 6.7-1.7 4.9-9.2 9.3-9.2 9.3z"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 3.5h11l3.5 3.5v12a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 19V5A1.5 1.5 0 0 1 6 3.5z"/><path d="M8 3.5v5h7v-5"/><rect x="7.5" y="13" width="9" height="7.5" rx="1"/></symbol>
     <symbol id="i-print" viewBox="0 0 24 24"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
     <symbol id="i-stamp" viewBox="0 0 24 24"><path d="M9.5 3.5h5l-1 7h4a2 2 0 0 1 2 2v3H4.5v-3a2 2 0 0 1 2-2h4z"/><path d="M5 19.5h14"/></symbol>
@@ -91,7 +92,9 @@
     <button class="ib" id="btnSearch" aria-label="Rechercher"><svg><use href="#i-search"/></svg></button>
     <button class="ib" id="btnUndo" aria-label="Annuler" disabled><svg><use href="#i-undo"/></svg></button>
     <button class="ib" id="btnRedo" aria-label="Rétablir" disabled><svg><use href="#i-redo"/></svg></button>
-    <button class="cta" id="btnSave" disabled><svg><use href="#i-share"/></svg><span>Partager</span></button>
+    <button class="ib" id="btnPrint" aria-label="Imprimer" title="Imprimer"><svg><use href="#i-print"/></svg></button>
+    <button class="ib" id="btnSave" aria-label="Enregistrer" title="Enregistrer" disabled><svg><use href="#i-save"/></svg></button>
+    <button class="ib accent" id="btnShare" aria-label="Partager" title="Partager" disabled><svg><use href="#i-share"/></svg></button>
     <button class="ib" id="btnMenu" aria-label="Menu"><svg><use href="#i-more"/></svg></button>
   </header>
 
@@ -122,6 +125,7 @@
           promotion des connaissances scientifiques et de la médecine de la plongée, ainsi que dans les domaines
           naval et maritime.</p>
         <button class="don-btn" id="btnDon"><svg><use href="#i-heart"/></svg>Faire un don</button>
+        <p class="don-secure"><svg><use href="#i-lock"/></svg>Paiement sécurisé sur helloasso.com</p>
         <p class="don-note">Votre don peut être anonyme ou nominatif. S'il est nominatif, un reçu fiscal français
           peut vous être délivré : PROMEDNAV est une association d'intérêt général, et votre don ouvre droit, pour
           un particulier, à une réduction d'impôt de 66 % de son montant (dans la limite de 20 % du revenu
@@ -311,9 +315,38 @@
 <section class="sheet tall" id="shSave" aria-label="Enregistrer">
   <div class="grab"></div>
   <div id="saveForm">
-    <h2>Enregistrer le PDF</h2>
+    <h2 id="saveTitle">Enregistrer le PDF</h2>
     <p class="sub" id="saveSrc"></p>
     <label class="field-l">Nom du fichier<input type="text" id="saveName" autocomplete="off"></label>
+    <div class="field-l" style="margin-bottom:6px">Format</div>
+    <div class="seg fmt" id="saveFmt">
+      <button data-f="pdf" class="on">PDF</button>
+      <button data-f="img">Image</button>
+      <button data-f="docx">Word</button>
+      <button data-f="odt">ODT</button>
+      <button data-f="txt">Texte</button>
+    </div>
+    <div id="imgOpts" hidden>
+      <div class="opts two">
+        <label class="opt"><input type="radio" name="imgType" value="png" checked>
+          <span><b>PNG</b><small>Net, sans perte : texte, schémas</small></span></label>
+        <label class="opt"><input type="radio" name="imgType" value="jpg">
+          <span><b>JPEG</b><small>Plus léger : photos, scans</small></span></label>
+      </div>
+      <label class="field-l inline">Résolution
+        <select id="imgDpi">
+          <option value="96">Écran (96 ppp)</option>
+          <option value="150" selected>Standard (150 ppp)</option>
+          <option value="300">Impression (300 ppp)</option>
+        </select></label>
+      <p class="sub">Une image par page. Plusieurs pages : partagées ensemble, ou téléchargées dans un fichier ZIP.</p>
+    </div>
+    <div id="txtOpts" hidden>
+      <p class="sub" id="txtHint">Le texte du PDF est extrait et peut être modifié ; la mise en page d'origine
+        (colonnes, tableaux, images) n'est pas conservée. Un PDF scanné ne contient pas de texte : ajoutez alors l'image des pages.</p>
+      <label class="chk" id="txtImgRow"><input type="checkbox" id="txtImages"> Ajouter aussi l'image de chaque page</label>
+    </div>
+    <div id="pdfOpts">
     <div class="opts">
       <label class="opt"><input type="radio" name="smode" value="vector" checked>
         <span><b>Qualité d'origine</b><small>Texte net et sélectionnable</small></span></label>
@@ -324,6 +357,7 @@
       <label class="field-l inline">Ne pas dépasser
         <input type="number" id="saveTarget" min="0.3" max="200" step="0.5" value="5" inputmode="decimal"> Mo</label>
       <label class="chk"><input type="checkbox" id="saveGray"> Niveaux de gris (plus net à taille égale)</label>
+    </div>
     </div>
     <label class="chk" id="flatRow" hidden><input type="checkbox" id="chkFlatten" checked>
       Verrouiller les champs du formulaire</label>
