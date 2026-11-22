@@ -44,6 +44,7 @@ Une seule fois : *Settings → Pages → Build and deployment → Source : **Git
 | **3.1** — Rechercher | texte surligné, insensible aux accents et majuscules |
 | **3.1** — Tampons | « Lu et approuvé », « Bon pour accord », « Copie conforme »… datés automatiquement, tampons personnalisés |
 | **3.1** — Documents récents | les 10 derniers PDF ouverts ou créés, rouvrables depuis l'accueil |
+| **3.3** — Autres formats | Enregistrer / Partager en **image** (PNG ou JPEG, 96 à 300 ppp, une image par page, ZIP au téléchargement), **Word** (.docx), **OpenDocument** (.odt) ou **texte** (.txt) : texte extrait et modifiable, mise en page non conservée, option « image de chaque page » pour les PDF scannés |
 | Confort mobile | pincer pour zoomer, annuler/rétablir, aperçu des pages, mode sombre, hors connexion |
 
 Bon à savoir : sur iPhone, les signatures et textes enregistrés de l'application installée sont

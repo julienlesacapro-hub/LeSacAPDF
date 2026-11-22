@@ -7,7 +7,7 @@
 (function () {
 "use strict";
 
-const APP_VERSION = "3.2.0";
+const APP_VERSION = "3.3.0";
 
 /* Lien de la page de don de l'association PROMEDNAV.
    À RENSEIGNER : tant qu'il est vide, le bouton « Faire un don » affiche
@@ -1744,10 +1744,9 @@ function openSave(intent) {
   if (!S.doc) return;
   S.intent = intent === "share" ? "share" : "save";
   const share = S.intent === "share";
-  $("#saveTitle").textContent = share ? "Partager le PDF" : "Enregistrer le PDF";
-  $("#saveGo").textContent = share ? "Préparer le partage" : "Créer le PDF";
+  syncFmt();
   $("#saveForm").hidden = false; $("#saveDone").hidden = true;
-  $("#saveName").value = S.name.replace(/\.pdf$/i, "") + " - rempli.pdf";
+  $("#saveName").value = S.name.replace(/\.pdf$/i, "") + " - rempli";
   $("#saveSrc").textContent = S.pages.length + " page" + (S.pages.length > 1 ? "s" : "") +
     (S.srcSize ? " · " + fmtMo(S.srcSize) + " à l'origine" : "");
   syncSmall();
@@ -1761,6 +1760,20 @@ function setDoneMode(intent) {
   sh.innerHTML = icon("share") + (save ? "Partager" : "Partager ou enregistrer");
   dl.innerHTML = icon("save") + (save ? "Enregistrer le fichier" : "Télécharger");
   if (save) sh.before(dl); else dl.before(sh);
+}
+/* format choisi : PDF (par défaut), image, Word, ODT ou texte */
+function curFmt() { const b = $("#saveFmt .on"); return b ? b.dataset.f : "pdf"; }
+function syncFmt() {
+  const f = curFmt(), share = S.intent === "share";
+  const label = { pdf: "le PDF", img: "en image", docx: "en Word", odt: "en ODT", txt: "en texte" }[f];
+  $("#saveTitle").textContent = (share ? "Partager " : "Enregistrer ") + label;
+  $("#saveGo").textContent = share ? "Préparer le partage" : (f === "pdf" ? "Créer le PDF" : "Créer le fichier");
+  $("#pdfOpts").hidden = f !== "pdf";
+  $("#imgOpts").hidden = f !== "img";
+  $("#txtOpts").hidden = !(f === "docx" || f === "odt" || f === "txt");
+  $("#txtImgRow").hidden = f === "txt";
+  /* le nom saisi perd une éventuelle extension : elle est ajoutée selon le format */
+  $("#saveName").value = $("#saveName").value.replace(/\.(pdf|png|jpe?g|docx|odt|txt|zip)$/i, "");
 }
 function syncSmall() {
   const small = $$('input[name=smode]').find(r => r.checked).value === "small";
@@ -2882,6 +2895,325 @@ function faireUnDon() {
   window.open(DON_URL, "_blank", "noopener");
 }
 
+/* =====================================================================
+   VERSION 3.3 — enregistrement dans d'autres formats :
+   images (PNG, JPEG), Word (.docx), OpenDocument (.odt), texte (.txt).
+   Tout est fabriqué sur l'appareil, à partir du PDF annoté.
+   ===================================================================== */
+const MIME = {
+  pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", zip: "application/zip",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  odt: "application/vnd.oasis.opendocument.text", txt: "text/plain"
+};
+
+/* --- archive ZIP sans compression (suffisant pour DOCX, ODT et lots d'images) */
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(d) { let c = 0xFFFFFFFF; for (let i = 0; i < d.length; i++) c = CRC_T[(c ^ d[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zipStore(entries) {
+  const enc = new TextEncoder(), parts = [], central = [];
+  let off = 0;
+  const now = new Date();
+  const dt = ((now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1)) & 0xFFFF;
+  const dd = (((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate()) & 0xFFFF;
+  for (const e of entries) {
+    const name = enc.encode(e.name), data = typeof e.data === "string" ? enc.encode(e.data) : e.data;
+    const crc = crc32(data);
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, 0, true);
+    h.setUint16(10, dt, true); h.setUint16(12, dd, true); h.setUint32(14, crc, true);
+    h.setUint32(18, data.length, true); h.setUint32(22, data.length, true); h.setUint16(26, name.length, true); h.setUint16(28, 0, true);
+    parts.push(new Uint8Array(h.buffer), name, data);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true);
+    c.setUint16(10, 0, true); c.setUint16(12, dt, true); c.setUint16(14, dd, true); c.setUint32(16, crc, true);
+    c.setUint32(20, data.length, true); c.setUint32(24, data.length, true); c.setUint16(28, name.length, true);
+    c.setUint32(42, off, true);
+    central.push(new Uint8Array(c.buffer), name);
+    off += 30 + name.length + data.length;
+  }
+  const cSize = central.reduce((s, a) => s + a.length, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, entries.length, true); end.setUint16(10, entries.length, true);
+  end.setUint32(12, cSize, true); end.setUint32(16, off, true);
+  const all = parts.concat(central, [new Uint8Array(end.buffer)]);
+  const out = new Uint8Array(all.reduce((s, a) => s + a.length, 0));
+  let p = 0; for (const a of all) { out.set(a, p); p += a.length; }
+  return out;
+}
+
+/* --- rendu des pages du PDF annoté en images */
+async function renderPages(bytes, dpi, type, onPage) {
+  const doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+  const out = [], cv = document.createElement("canvas"), cx = cv.getContext("2d", { alpha: false });
+  const cap = isIOS ? 9e6 : 16e6;
+  try {
+    for (let i = 1; i <= doc.numPages; i++) {
+      if (onPage) onPage(i, doc.numPages);
+      await yieldUI();
+      const pg = await doc.getPage(i);
+      let k = dpi / 72;
+      const base = pg.getViewport({ scale: 1 });
+      if (base.width * base.height * k * k > cap) k = Math.sqrt(cap / (base.width * base.height));
+      const vp = pg.getViewport({ scale: k });
+      cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+      cx.fillStyle = "#fff"; cx.fillRect(0, 0, cv.width, cv.height);
+      await pg.render({ canvasContext: cx, viewport: vp, intent: "print" }).promise;
+      const blob = await new Promise(r => cv.toBlob(r, type === "png" ? "image/png" : "image/jpeg", 0.9));
+      out.push({ blob, w: cv.width, h: cv.height, pw: base.width, ph: base.height });
+      pg.cleanup();
+    }
+  } finally { cv.width = cv.height = 1; try { await doc.destroy(); } catch (e) {} }
+  return out;
+}
+
+/* --- extraction du texte : lignes puis paragraphes, page par page */
+async function extractText(bytes) {
+  const doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+  const pages = [];
+  try {
+    for (let i = 1; i <= doc.numPages; i++) {
+      const pg = await doc.getPage(i);
+      const vp = pg.getViewport({ scale: 1 });
+      const tc = await pg.getTextContent();
+      const items = [];
+      for (const it of tc.items) {
+        if (!it.str || !it.str.trim() && !it.hasEOL) continue;
+        const [a, b, c, d, e, f] = it.transform;
+        const h = Math.hypot(c, d) || Math.hypot(a, b) || 10;
+        const p0 = vp.convertToViewportPoint(e, f);
+        items.push({ s: it.str, x: p0[0], y: p0[1], h, w: it.width || 0 });
+      }
+      items.sort((p, q) => p.y - q.y || p.x - q.x);
+      const lines = [];
+      for (const it of items) {
+        if (!it.s.trim()) continue;
+        const L = lines[lines.length - 1];
+        if (L && Math.abs(it.y - L.y) < Math.max(it.h, L.h) * 0.5) { L.items.push(it); L.h = Math.max(L.h, it.h); }
+        else lines.push({ y: it.y, h: it.h, items: [it] });
+      }
+      const outLines = lines.map(L => {
+        L.items.sort((p, q) => p.x - q.x);
+        let s = "", end = null;
+        for (const it of L.items) {
+          if (end !== null && it.x - end > it.h * 0.18 && !/\s$/.test(s) && !/^\s/.test(it.s)) s += " ";
+          s += it.s; end = it.x + it.w;
+        }
+        return { text: s.replace(/\s+/g, " ").trim(), y: L.y, h: L.h };
+      }).filter(l => l.text);
+      /* paragraphes : un écart vertical nettement plus grand que l'interligne */
+      const paras = [];
+      let prev = null;
+      for (const l of outLines) {
+        const P = paras[paras.length - 1];
+        if (P && prev && l.y - prev.y < Math.max(l.h, prev.h) * 1.75 && Math.abs(l.h - prev.h) < 2) P.lines.push(l.text);
+        else paras.push({ lines: [l.text], size: l.h });
+        prev = l;
+      }
+      pages.push(paras);
+      pg.cleanup();
+    }
+  } finally { try { await doc.destroy(); } catch (e) {} }
+  return pages;
+}
+
+const xe = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]))
+  .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+
+/* --- Word (.docx) */
+async function buildDocx(pages, images, title) {
+  const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+  const body = [], media = [], rels = [];
+  const sizes = pages.flat().map(p => p.size).sort((a, b) => a - b);
+  const med = sizes.length ? sizes[sizes.length >> 1] : 11;
+  const EMU = 360000, maxW = 17 * EMU, maxH = 24.7 * EMU;
+  const pageCount = Math.max(pages.length, images ? images.length : 0);
+  for (let i = 0; i < pageCount; i++) {
+    if (i) body.push('<w:p><w:r><w:br w:type="page"/></w:r></w:p>');
+    if (images && images[i]) {
+      const im = images[i], id = "rIdImg" + (i + 1), ext = im.ext, fn = "media/page" + (i + 1) + "." + ext;
+      media.push({ name: "word/" + fn, data: new Uint8Array(await im.blob.arrayBuffer()) });
+      rels.push('<Relationship Id="' + id + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="' + fn + '"/>');
+      let cx = maxW, cy = Math.round(maxW * im.ph / im.pw);
+      if (cy > maxH) { cx = Math.round(cx * maxH / cy); cy = maxH; }
+      body.push('<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">' +
+        '<wp:extent cx="' + cx + '" cy="' + cy + '"/><wp:docPr id="' + (i + 1) + '" name="Page ' + (i + 1) + '"/>' +
+        '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
+        '<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="' + (i + 1) + '" name="page' + (i + 1) + '.' + ext + '"/><pic:cNvPicPr/></pic:nvPicPr>' +
+        '<pic:blipFill><a:blip r:embed="' + id + '"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>' +
+        '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + cx + '" cy="' + cy + '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>' +
+        '</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>');
+      if (pages[i] && pages[i].length) body.push('<w:p><w:r><w:br w:type="page"/></w:r></w:p>');
+    }
+    for (const p of pages[i] || []) {
+      const big = p.size > med * 1.25;
+      const sz = Math.round(clamp(p.size, 7, 32) * 2);
+      const rpr = '<w:rPr>' + (big ? "<w:b/>" : "") + '<w:sz w:val="' + sz + '"/><w:szCs w:val="' + sz + '"/></w:rPr>';
+      const runs = p.lines.map((l, k) => (k ? '<w:r>' + rpr + '<w:br/></w:r>' : "") +
+        '<w:r>' + rpr + '<w:t xml:space="preserve">' + xe(l) + '</w:t></w:r>').join("");
+      body.push('<w:p><w:pPr><w:spacing w:after="160"/></w:pPr>' + runs + '</w:p>');
+    }
+  }
+  if (!body.length) body.push("<w:p/>");
+  const doc = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<w:document xmlns:w="' + W + '" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
+    'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:body>' + body.join("") +
+    '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr>' +
+    '</w:body></w:document>';
+  const styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="' + W + '"><w:docDefaults>' +
+    '<w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/><w:sz w:val="22"/><w:lang w:val="fr-FR"/></w:rPr></w:rPrDefault>' +
+    '<w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="264" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults></w:styles>';
+  const ct = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +
+    '<Default Extension="png" ContentType="image/png"/><Default Extension="jpg" ContentType="image/jpeg"/>' +
+    '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+    '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>' +
+    '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>';
+  const rootRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+    '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>';
+  const docRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' + rels.join("") + '</Relationships>';
+  const core = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" ' +
+    'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">' +
+    '<dc:title>' + xe(title) + '</dc:title><dc:creator>LeSacAPDF</dc:creator>' +
+    '<dcterms:created xsi:type="dcterms:W3CDTF">' + new Date().toISOString().slice(0, 19) + 'Z</dcterms:created></cp:coreProperties>';
+  return zipStore([{ name: "[Content_Types].xml", data: ct }, { name: "_rels/.rels", data: rootRels },
+    { name: "docProps/core.xml", data: core }, { name: "word/document.xml", data: doc },
+    { name: "word/styles.xml", data: styles }, { name: "word/_rels/document.xml.rels", data: docRels }].concat(media));
+}
+
+/* --- OpenDocument texte (.odt) */
+async function buildOdt(pages, images, title) {
+  const sizes = pages.flat().map(p => p.size).sort((a, b) => a - b);
+  const med = sizes.length ? sizes[sizes.length >> 1] : 11;
+  const used = new Set(), body = [], media = [];
+  const pageCount = Math.max(pages.length, images ? images.length : 0);
+  for (let i = 0; i < pageCount; i++) {
+    let brk = i > 0;
+    const style = base => { if (brk) { brk = false; return base + "B"; } return base; };
+    if (images && images[i]) {
+      const im = images[i], fn = "Pictures/page" + (i + 1) + "." + im.ext;
+      media.push({ name: fn, data: new Uint8Array(await im.blob.arrayBuffer()), type: MIME[im.ext] });
+      let w = 17, h = 17 * im.ph / im.pw;
+      if (h > 24.7) { w = w * 24.7 / h; h = 24.7; }
+      body.push('<text:p text:style-name="' + style("C") + '"><draw:frame draw:name="Page ' + (i + 1) + '" text:anchor-type="as-char" svg:width="' +
+        w.toFixed(2) + 'cm" svg:height="' + h.toFixed(2) + 'cm"><draw:image xlink:href="' + fn + '" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/></draw:frame></text:p>');
+      if (pages[i] && pages[i].length) brk = true;
+    }
+    for (const p of pages[i] || []) {
+      const sz = Math.round(clamp(p.size, 7, 32)), big = p.size > med * 1.25;
+      const ts = "T" + sz + (big ? "b" : ""); used.add(ts);
+      body.push('<text:p text:style-name="' + style("P") + '"><text:span text:style-name="' + ts + '">' +
+        p.lines.map(xe).join("<text:line-break/>") + "</text:span></text:p>");
+    }
+  }
+  const auto = ['<style:style style:name="P" style:family="paragraph"><style:paragraph-properties fo:margin-bottom="0.28cm"/></style:style>',
+    '<style:style style:name="PB" style:family="paragraph"><style:paragraph-properties fo:margin-bottom="0.28cm" fo:break-before="page"/></style:style>',
+    '<style:style style:name="C" style:family="paragraph"><style:paragraph-properties fo:text-align="center"/></style:style>',
+    '<style:style style:name="CB" style:family="paragraph"><style:paragraph-properties fo:text-align="center" fo:break-before="page"/></style:style>']
+    .concat([...used].map(ts => '<style:style style:name="' + ts + '" style:family="text"><style:text-properties fo:font-size="' +
+      parseInt(ts.slice(1), 10) + 'pt"' + (ts.endsWith("b") ? ' fo:font-weight="bold"' : "") + "/></style:style>"));
+  const NS = 'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" ' +
+    'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" ' +
+    'xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" ' +
+    'xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0"';
+  const content = '<?xml version="1.0" encoding="UTF-8"?><office:document-content ' + NS + ' office:version="1.2">' +
+    "<office:automatic-styles>" + auto.join("") + "</office:automatic-styles><office:body><office:text>" +
+    (body.join("") || "<text:p/>") + "</office:text></office:body></office:document-content>";
+  const styles = '<?xml version="1.0" encoding="UTF-8"?><office:document-styles ' + NS + ' office:version="1.2"><office:styles>' +
+    '<style:default-style style:family="paragraph"><style:text-properties style:font-name="Liberation Sans" fo:font-family="Calibri, Arial, sans-serif" fo:font-size="11pt" fo:language="fr" fo:country="FR"/></style:default-style>' +
+    '</office:styles><office:automatic-styles><style:page-layout style:name="pm1"><style:page-layout-properties fo:page-width="21cm" fo:page-height="29.7cm" ' +
+    'fo:margin-top="2cm" fo:margin-bottom="2cm" fo:margin-left="2cm" fo:margin-right="2cm"/></style:page-layout></office:automatic-styles>' +
+    '<office:master-styles><style:master-page style:name="Standard" style:page-layout-name="pm1"/></office:master-styles></office:document-styles>';
+  const meta = '<?xml version="1.0" encoding="UTF-8"?><office:document-meta ' + NS + ' office:version="1.2"><office:meta><dc:title>' + xe(title) +
+    '</dc:title><meta:generator>LeSacAPDF</meta:generator></office:meta></office:document-meta>';
+  const manifest = '<?xml version="1.0" encoding="UTF-8"?><manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2">' +
+    '<manifest:file-entry manifest:full-path="/" manifest:version="1.2" manifest:media-type="' + MIME.odt + '"/>' +
+    '<manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>' +
+    '<manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/>' +
+    '<manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/>' +
+    media.map(m => '<manifest:file-entry manifest:full-path="' + m.name + '" manifest:media-type="' + m.type + '"/>').join("") +
+    "</manifest:manifest>";
+  /* « mimetype » doit être la première entrée, non compressée */
+  return zipStore([{ name: "mimetype", data: MIME.odt }, { name: "content.xml", data: content }, { name: "styles.xml", data: styles },
+    { name: "meta.xml", data: meta }, { name: "META-INF/manifest.xml", data: manifest }].concat(media));
+}
+
+function buildTxt(pages) {
+  return pages.map((paras, i) => (i ? "\n\n--- Page " + (i + 1) + " ---\n\n" : "") +
+    paras.map(p => p.lines.join("\n")).join("\n\n")).join("") + "\n";
+}
+
+/* --- fabrication du ou des fichiers dans le format choisi */
+async function makeExport(fmt, baseName, opt) {
+  busy(true, "Préparation du document…");
+  await new Promise(r => setTimeout(r, 30));
+  try {
+    const bytes = await buildVector();
+    if (fmt === "img") {
+      const type = opt.imgType, ext = type === "png" ? "png" : "jpg";
+      const imgs = await renderPages(bytes.slice(0), opt.dpi, type, (i, n) => busy(true, "Image de la page " + i + " sur " + n + "…"));
+      const files = imgs.map((im, i) => ({ name: baseName + (imgs.length > 1 ? " - page " + (i + 1) : "") + "." + ext, blob: im.blob, type: MIME[ext] }));
+      const tot = files.reduce((s, f) => s + f.blob.size, 0);
+      return { files, info: files.length + " image" + (files.length > 1 ? "s " : " ") + ext.toUpperCase() + " · " + fmtMo(tot) };
+    }
+    busy(true, "Extraction du texte…");
+    const pages = await extractText(bytes.slice(0));
+    const nWords = pages.flat().reduce((s, p) => s + p.lines.join(" ").split(/\s+/).filter(Boolean).length, 0);
+    let images = null;
+    if ((fmt === "docx" || fmt === "odt") && opt.withImages) {
+      images = (await renderPages(bytes.slice(0), 130, "jpg", (i, n) => busy(true, "Image de la page " + i + " sur " + n + "…")))
+        .map(im => Object.assign(im, { ext: "jpg" }));
+    }
+    let data;
+    if (fmt === "docx") data = await buildDocx(pages, images, baseName);
+    else if (fmt === "odt") data = await buildOdt(pages, images, baseName);
+    else data = new TextEncoder().encode(buildTxt(pages));
+    const blob = new Blob([data], { type: MIME[fmt] });
+    const note = !nWords ? (images ? "aucun texte trouvé (document scanné ?) : pages ajoutées en images" :
+      "aucun texte trouvé : document scanné ? Cochez « Ajouter aussi l'image de chaque page »") : nWords + " mots";
+    return { files: [{ name: baseName + "." + fmt, blob, type: MIME[fmt] }], info: note + " · " + fmtMo(blob.size), empty: !nWords && !images };
+  } finally { busy(false); }
+}
+
+/* --- partage de plusieurs fichiers (images d'un document de plusieurs pages) */
+async function shareFiles(files) {
+  try {
+    const list = files.map(f => new File([f.blob], f.name, { type: f.type }));
+    if (navigator.canShare && navigator.canShare({ files: list })) {
+      await navigator.share({ files: list, title: files[0].name });
+      return "shared";
+    }
+  } catch (e) {
+    if (e && e.name === "AbortError") return "aborted";
+    console.warn("partage impossible :", e);
+  }
+  saveFiles(files);
+  toast("Partage de ce format non pris en charge ici : fichier téléchargé.", 4500);
+  return "downloaded";
+}
+/* --- enregistrement : un fichier tel quel, plusieurs fichiers dans un ZIP */
+async function saveFiles(files, zipName) {
+  let blob, name;
+  if (files.length === 1) { blob = files[0].blob; name = files[0].name; }
+  else {
+    const entries = [];
+    for (const f of files) entries.push({ name: f.name, data: new Uint8Array(await f.blob.arrayBuffer()) });
+    blob = new Blob([zipStore(entries)], { type: MIME.zip }); name = zipName || "images.zip";
+  }
+  if (typeof window.showSaveFilePicker === "function") {
+    try {
+      const ext = "." + name.split(".").pop();
+      const h = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: ext.toUpperCase().slice(1), accept: { [blob.type || "application/octet-stream"]: [ext] } }] });
+      const w = await h.createWritable(); await w.write(blob); await w.close();
+      toast("Enregistré : " + h.name); return;
+    } catch (e) { if (e && e.name === "AbortError") return; }
+  }
+  download(blob, name);
+  toast("Fichier téléchargé : " + name, 4000);
+}
+
 /* ------------------------------------------------- branchements de la v3.1 */
 function initV31() {
   /* recherche */
@@ -3132,16 +3464,40 @@ function init() {
   $("#btnShare").onclick = () => { setTool("select"); select(null); openSave("share"); };
   $("#btnPrint").onclick = () => printDoc();
   $$('input[name=smode]').forEach(r => r.onchange = syncSmall);
+  $$("#saveFmt button").forEach(b => b.onclick = () => {
+    $$("#saveFmt button").forEach(x => x.classList.toggle("on", x === b)); syncFmt();
+  });
   $("#saveGo").onclick = async () => {
     const mode = $$('input[name=smode]').find(r => r.checked).value;
-    let nm = $("#saveName").value.trim().replace(/[\\/:*?"<>|]+/g, "-") || "document.pdf";
-    if (!/\.pdf$/i.test(nm)) nm += ".pdf";
+    const fmt = curFmt();
+    const base = $("#saveName").value.trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\.(pdf|png|jpe?g|docx|odt|txt|zip)$/i, "") || "document";
+    if (fmt !== "pdf") {
+      document.activeElement && document.activeElement.blur && document.activeElement.blur();
+      try {
+        const r = await makeExport(fmt, base, {
+          imgType: $$('input[name=imgType]').find(x => x.checked).value, dpi: +$("#imgDpi").value,
+          withImages: $("#txtImages").checked });
+        S.out = { files: r.files, name: r.files.length > 1 ? base + " - images.zip" : r.files[0].name };
+        $("#doneName").textContent = r.files.length > 1 ? r.files.length + " images · " + base : r.files[0].name;
+        $("#doneInfo").textContent = "Prêt · " + r.info;
+        $("#saveForm").hidden = true; $("#saveDone").hidden = false;
+        $("#doneOpen").hidden = true;
+        setDoneMode(S.intent);
+        $("#shSave").scrollTop = 0;
+        if (r.empty) toast("Aucun texte trouvé : ce PDF est probablement scanné.", 5000);
+      } catch (e) {
+        console.error(e);
+        toast("Échec de l'export : " + e.message, 7000);
+      }
+      return;
+    }
+    const nm = base + ".pdf";
     const cible = Math.max(0.2, parseFloat(String($("#saveTarget").value).replace(",", ".")) || 5) * Mo;
     const gris = $("#saveGray").checked;
     document.activeElement && document.activeElement.blur && document.activeElement.blur();
     try {
       const r = await makePdf(mode, cible, gris);
-      S.out = { bytes: r.bytes, name: nm };
+      S.out = { bytes: r.bytes, name: nm, files: [{ name: nm, blob: new Blob([r.bytes], { type: "application/pdf" }), type: "application/pdf" }] };
       $("#doneName").textContent = nm;
       $("#doneInfo").textContent = "PDF prêt · " + fmtMo(r.bytes.length) + (r.note ? " · " + r.note : "");
       $("#saveForm").hidden = true; $("#saveDone").hidden = false;
@@ -3156,11 +3512,13 @@ function init() {
   };
   $("#doneShare").onclick = async () => {
     if (!S.out) return;
+    if (!S.out.bytes) { const r = await shareFiles(S.out.files); if (r === "shared") toast("Partagé."); return; }
     const r = await shareOrSave(new Blob([S.out.bytes], { type: "application/pdf" }), S.out.name, "application/pdf");
     if (r === "shared") toast("Document partagé.");
   };
   $("#doneDl").onclick = async () => {
     if (!S.out) return;
+    if (!S.out.bytes) { saveFiles(S.out.files, S.out.name); return; }
     const blob = new Blob([S.out.bytes], { type: "application/pdf" });
     if (typeof window.showSaveFilePicker === "function") {
       try {

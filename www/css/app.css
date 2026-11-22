@@ -492,3 +492,11 @@ body:not(.has-doc) #btnSearch, body:not(.has-doc) #btnPrint, body:not(.has-doc) 
 .don-btn svg { width: 20px; height: 20px; fill: currentColor; }
 .don-btn:active { transform: scale(.98); }
 .don-card .don-note { font-size: 12.5px; }
+
+/* ------------------------------------------------ choix du format d'export */
+.seg.fmt { margin: 0 0 10px; }
+.seg.fmt button { font-size: 13.5px; padding: 0 4px; }
+.opts.two { grid-template-columns: 1fr 1fr; margin-bottom: 4px; }
+.sheet select { border: 1px solid var(--line); border-radius: 10px; height: 40px; padding: 0 10px; background: var(--surface-2);
+  color: var(--ink); font: inherit; font-size: 15px; }
+#imgOpts .sub, #txtOpts .sub { margin: 6px 0 0; font-size: 12.5px; }
