@@ -7,7 +7,7 @@
 (function () {
 "use strict";
 
-const APP_VERSION = "3.3.1";
+const APP_VERSION = "4.0.0";
 
 /* Lien de la page de don de l'association PROMEDNAV.
    À RENSEIGNER : tant qu'il est vide, le bouton « Faire un don » affiche
@@ -206,12 +206,17 @@ function hideSheet() {
   document.activeElement && document.activeElement.blur && document.activeElement.blur();
   if (el._onclose) { const f = el._onclose; el._onclose = null; f(); }
 }
+/* un seul « retour » à la fois : un second history.back() avant le popstate
+   ferait quitter l'application */
+let backPending = false;
 function closeSheet() {
   if (!curSheet) return;
-  if (history.state && history.state.sheet) history.back();   /* popstate -> hideSheet */
-  else hideSheet();
+  if (history.state && history.state.sheet) {               /* popstate -> hideSheet */
+    if (backPending) return;
+    backPending = true; history.back();
+  } else hideSheet();
 }
-window.addEventListener("popstate", () => { if (curSheet) hideSheet(); else hidePanel(); });
+window.addEventListener("popstate", () => { backPending = false; if (curSheet) hideSheet(); else hidePanel(); });
 
 /* panneaux plein écran (organiser, aperçu, scanner), empilables */
 const panels = [];
@@ -230,7 +235,8 @@ function hidePanel() {
 }
 function closePanel() {
   if (!panels.length) return;
-  if (history.state && history.state.panel) history.back(); else hidePanel();
+  if (history.state && history.state.panel) { if (backPending) return; backPending = true; history.back(); }
+  else hidePanel();
 }
 
 /* glisser la feuille vers le bas pour la fermer */
@@ -279,6 +285,7 @@ async function openBytes(bytes, name, opt) {
     S.srcSize = bytes.length;
     S.items = []; S.fields = []; S.values = {}; S.undo = []; S.redo = []; S.sel = null; S.cur = 0;
     S.pending = null; setTool("select");
+    S.wm = null;
     Search.reset();
     $("#empty").hidden = true;
     document.body.classList.add("has-doc");
@@ -355,6 +362,7 @@ function render() {
   renderItems();
   renderFields();
   Search.render();
+  WM.render();
 }
 
 /* Les pages ne sont dessinées que lorsqu'elles approchent de l'écran, et
@@ -416,7 +424,7 @@ function repaintAll() {
     p.painted = false;
   }
   observePages();                               /* redessine ce qui est visible */
-  renderItems(); renderFields(); Search.render();
+  renderItems(); renderFields(); Search.render(); WM.render();
 }
 
 let thumbObs = null;
@@ -626,6 +634,8 @@ function renderItems() {
       el.classList.add("stroke");
     } else if (it.type === "mask") {
       el.style.background = it.color || "#ffffff";
+    } else if (it.type === "redact") {
+      el.classList.add("redact");
     }
 
     let hd = null;
@@ -820,7 +830,7 @@ function bindLayer(p) {
     S.cur = p.num - 1;
     if (S.pending) return;
     const [x, y] = layerPos(p, ev);
-    if (S.tool === "mask") { ev.preventDefault(); dragRect(p, ev, x, y); }
+    if (S.tool === "mask" || S.tool === "redact") { ev.preventDefault(); dragRect(p, ev, x, y, S.tool); }
     else if (S.tool === "pen" || S.tool === "marker") { ev.preventDefault(); drawStroke(p, ev, x, y); }
   });
   /* outils « touchés » : un appui bref (pas de défilement) */
@@ -855,9 +865,9 @@ function bindLayer(p) {
   });
 }
 
-function dragRect(p, ev, x0, y0) {
+function dragRect(p, ev, x0, y0, kind) {
   const ghost = document.createElement("div");
-  ghost.style.cssText = "position:absolute;background:#fff;outline:1.5px dashed #2D6CDF;";
+  ghost.style.cssText = "position:absolute;background:" + (kind === "redact" ? "#000" : "#fff") + ";outline:1.5px dashed #2D6CDF;";
   p.layer.appendChild(ghost);
   const r = p.layer.getBoundingClientRect();
   let x1 = x0, y1 = y0;
@@ -876,7 +886,8 @@ function dragRect(p, ev, x0, y0) {
     stroke = null;
     const w = Math.abs(x1 - x0), h = Math.abs(y1 - y0);
     if (ok && w > 4 && h > 4) {
-      addItem({ type: "mask", page: p.num - 1, x: Math.min(x1, x0), y: Math.min(y1, y0), w, h, color: "#ffffff" });
+      addItem({ type: kind === "redact" ? "redact" : "mask", page: p.num - 1, x: Math.min(x1, x0), y: Math.min(y1, y0), w, h,
+        color: kind === "redact" ? "#000000" : "#ffffff" });
       setTool("select");
     }
   };
@@ -1062,14 +1073,19 @@ const HINTS = {
   circle: "Touchez le mot ou la zone à entourer",
   pen: "Dessinez avec le doigt",
   marker: "Passez le doigt sur le texte à surligner",
-  mask: "Tracez un rectangle sur la zone à cacher"
+  mask: "Tracez un rectangle sur la zone à cacher",
+  redact: "Tracez un rectangle sur ce qui doit disparaître définitivement"
 };
 function setTool(t, keepPending) {
   if (!keepPending) S.pending = null;
   S.tool = t;
   if (t !== "select") S.sel = null;
   $$(".tool[data-tool]").forEach(b => b.classList.toggle("on", b.dataset.tool === t && !S.pending));
-  document.body.classList.toggle("drawing", t === "pen" || t === "marker" || t === "mask");
+  document.body.classList.toggle("drawing", t === "pen" || t === "marker" || t === "mask" || t === "redact");
+  if (t === "redact" && !S.redactInfo) {
+    S.redactInfo = true;
+    toast("Censure : les zones noires seront définitivement supprimées à l'enregistrement (la page concernée devient une image).", 6000);
+  }
   document.body.classList.toggle("placing", t !== "select" || !!S.pending);
   if (t !== "select") $$(".item").forEach(e => e.classList.remove("sel"));
   if (t === "select" && !S.pending) hideHint();
@@ -1420,7 +1436,7 @@ async function drawItems(doc, page, items, g, fonts) {
   const { degrees, LineCapStyle } = L;
   const rot = degrees(g.rot);
   for (const it of items) {
-    if (it.type === "mask") {
+    if (it.type === "mask" || it.type === "redact") {
       const a = mapPt(it.x, it.y + it.h, g);
       page.drawRectangle({ x: a[0], y: a[1], width: it.w, height: it.h,
         color: hexRgb(it.color || "#ffffff", L), rotate: rot });
@@ -1568,7 +1584,7 @@ async function buildVector(opt) {
           else { form.getTextField(f.name).setText(clean(v || "")); }
         } catch (e) { console.warn("champ « " + f.name + " » :", e.message); }
       }
-      if ((opt && opt.flatten) || $("#chkFlatten").checked) {
+      if ((opt && opt.flatten) || $("#chkFlatten").checked || (!sansAnnotations && hasRedactions())) {
         try { form.flatten(); await doc.flush(); pruneDangling(doc); } catch (e) { console.warn(e); }
       }
     }
@@ -1580,11 +1596,14 @@ async function buildVector(opt) {
     if (p.rot !== ((p.page.rotate % 360) + 360) % 360) {
       try { pages[i].setRotation(L.degrees(p.rot)); } catch (e) {}
     }
-    if (!items.length || sansAnnotations) continue;
-    await drawItems(doc, pages[i], items,
-      { x1: p.view[0], y1: p.view[1], pw: p.pw, ph: p.ph, rot: p.rot }, fonts);
+    if (sansAnnotations) continue;
+    const g = { x1: p.view[0], y1: p.view[1], pw: p.pw, ph: p.ph, rot: p.rot };
+    if (items.length) await drawItems(doc, pages[i], items, g, fonts);
+    if (S.wm) await WM.draw(doc, pages[i], g, i, fonts);
   }
-  return doc.save({ useObjectStreams: false });
+  const saved = await doc.save({ useObjectStreams: false });
+  /* censure définitive : pages concernées remplacées par une image noircie */
+  return (!sansAnnotations && hasRedactions()) ? burnRedactions(saved) : saved;
 }
 
 /* ---------------------------------------------- allègement du document
@@ -1675,13 +1694,16 @@ async function buildSmall(targetBytes, gray) {
     cx.fillStyle = "#fff"; cx.fillRect(0, 0, cv.width, cv.height);
     await page.render({ canvasContext: cx, viewport: vp, intent: "print" }).promise;
     if (gray) toGray(cx, cv);
+    { const kk = cv.width / p.dw; cx.fillStyle = "#000";
+      for (const it of S.items.filter(x => x.type === "redact" && x.page === i)) cx.fillRect(it.x * kk - 1, it.y * kk - 1, it.w * kk + 2, it.h * kk + 2); }
     const r = await fitPage(cv, tmp, Math.max(9000, reste / (n - i)), hint);
     hint = { s: r.s, q: r.q };
     const img = await out.embedJpg(new Uint8Array(await r.blob.arrayBuffer()));
     const pg = out.addPage([p.dw, p.dh]);
     pg.drawImage(img, { x: 0, y: 0, width: p.dw, height: p.dh });
-    await drawItems(out, pg, S.items.filter(it => it.page === i),
+    await drawItems(out, pg, S.items.filter(it => it.page === i && it.type !== "redact"),
       { x1: 0, y1: 0, pw: p.dw, ph: p.dh, rot: 0 }, fonts);
+    if (S.wm) await WM.draw(out, pg, { x1: 0, y1: 0, pw: p.dw, ph: p.dh, rot: 0 }, i, fonts);
     reste -= r.blob.size;
     try { page.cleanup(); } catch (e) {}
     if (!src) { try { p.page.cleanup(); } catch (e) {} p.painted = false; }
@@ -1765,15 +1787,21 @@ function setDoneMode(intent) {
 function curFmt() { const b = $("#saveFmt .on"); return b ? b.dataset.f : "pdf"; }
 function syncFmt() {
   const f = curFmt(), share = S.intent === "share";
-  const label = { pdf: "le PDF", img: "en image", docx: "en Word", odt: "en ODT", txt: "en texte" }[f];
+  const label = { pdf: "le PDF", pdfa: "en PDF/A", img: "en image", docx: "en Word", odt: "en ODT", pptx: "en PowerPoint",
+                  xlsx: "en Excel", txt: "en texte" }[f];
   $("#saveTitle").textContent = (share ? "Partager " : "Enregistrer ") + label;
   $("#saveGo").textContent = share ? "Préparer le partage" : (f === "pdf" ? "Créer le PDF" : "Créer le fichier");
   $("#pdfOpts").hidden = f !== "pdf";
   $("#imgOpts").hidden = f !== "img";
   $("#txtOpts").hidden = !(f === "docx" || f === "odt" || f === "txt");
   $("#txtImgRow").hidden = f === "txt";
+  $("#pdfaOpts").hidden = f !== "pdfa";
+  $("#pptOpts").hidden = f !== "pptx";
+  $("#xlsxOpts").hidden = f !== "xlsx";
+  $("#encRow").hidden = f !== "pdf";
+  $("#encBox").hidden = f !== "pdf" || !$("#encOn").checked;
   /* le nom saisi perd une éventuelle extension : elle est ajoutée selon le format */
-  $("#saveName").value = $("#saveName").value.replace(/\.(pdf|png|jpe?g|docx|odt|txt|zip)$/i, "");
+  $("#saveName").value = $("#saveName").value.replace(/\.(pdf|png|jpe?g|docx|odt|txt|zip|pptx|xlsx)$/i, "");
 }
 function syncSmall() {
   const small = $$('input[name=smode]').find(r => r.checked).value === "small";
@@ -2903,7 +2931,9 @@ function faireUnDon() {
 const MIME = {
   pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", zip: "application/zip",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  odt: "application/vnd.oasis.opendocument.text", txt: "text/plain"
+  odt: "application/vnd.oasis.opendocument.text", txt: "text/plain",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 };
 
 /* --- archive ZIP sans compression (suffisant pour DOCX, ODT et lots d'images) */
@@ -3150,13 +3180,38 @@ async function makeExport(fmt, baseName, opt) {
   busy(true, "Préparation du document…");
   await new Promise(r => setTimeout(r, 30));
   try {
-    const bytes = await buildVector();
+    /* le filigrane est une décoration : gardé dans les exports en image,
+       exclu des exports de texte (sinon il se mêle au contenu) */
+    const textual = /^(docx|odt|txt|xlsx)$/.test(fmt) || (fmt === "pptx" && opt.pptMode === "text");
+    const wmSave = S.wm;
+    if (textual) S.wm = null;
+    let bytes;
+    try { bytes = await buildVector(); } finally { S.wm = wmSave; }
     if (fmt === "img") {
       const type = opt.imgType, ext = type === "png" ? "png" : "jpg";
       const imgs = await renderPages(bytes.slice(0), opt.dpi, type, (i, n) => busy(true, "Image de la page " + i + " sur " + n + "…"));
       const files = imgs.map((im, i) => ({ name: baseName + (imgs.length > 1 ? " - page " + (i + 1) : "") + "." + ext, blob: im.blob, type: MIME[ext] }));
       const tot = files.reduce((s, f) => s + f.blob.size, 0);
       return { files, info: files.length + " image" + (files.length > 1 ? "s " : " ") + ext.toUpperCase() + " · " + fmtMo(tot) };
+    }
+    if (fmt === "pdfa") {
+      const out = await buildPdfA(bytes, baseName);
+      const blob = new Blob([out], { type: MIME.pdf });
+      return { files: [{ name: baseName + " (PDF-A).pdf", blob, type: MIME.pdf }], info: "PDF/A-2b · " + fmtMo(blob.size) };
+    }
+    if (fmt === "pptx") {
+      const out = await buildPptx(bytes, baseName, opt.pptMode);
+      const blob = new Blob([out], { type: MIME.pptx });
+      return { files: [{ name: baseName + ".pptx", blob, type: MIME.pptx }], info: "PowerPoint · " + fmtMo(blob.size) };
+    }
+    if (fmt === "xlsx") {
+      busy(true, "Analyse des tableaux…");
+      const sheets = await extractCells(bytes.slice(0));
+      const out = buildXlsx(sheets, baseName);
+      const blob = new Blob([out], { type: MIME.xlsx });
+      const rows = sheets.reduce((n, s2) => n + s2.length, 0);
+      return { files: [{ name: baseName + ".xlsx", blob, type: MIME.xlsx }],
+        info: sheets.length + " feuille" + (sheets.length > 1 ? "s" : "") + " · " + rows + " lignes · " + fmtMo(blob.size), empty: !rows };
     }
     busy(true, "Extraction du texte…");
     const pages = await extractText(bytes.slice(0));
@@ -3212,6 +3267,1039 @@ async function saveFiles(files, zipName) {
   }
   download(blob, name);
   toast("Fichier téléchargé : " + name, 4000);
+}
+
+/* =====================================================================
+   VERSION 4.0 — filigrane, censure définitive, chiffrement AES-256,
+   PDF/A-2b, PowerPoint, Excel, conversion vers PDF, comparaison.
+   ===================================================================== */
+
+/* ================================================================ filigrane */
+const WM_PRESETS = ["PROJET", "CONFIDENTIEL", "Usage exclusivement destiné à la location", "COPIE",
+                    "BROUILLON", "DOCUMENT DE TRAVAIL", "ANNULÉ", "NE PAS DIFFUSER"];
+const WM_DEF = { type: "text", text: "CONFIDENTIEL", font: "Helvetica", bold: true, color: "#c0392b",
+                 opacity: 0.25, pos: "diag", size: 60, fit: true, pages: "all", scale: 0.5, src: null, ratio: 1 };
+const WM = {
+  /* taille effective du texte (ajustée à la page si « fit ») */
+  size(pw, ph, wm, widthAt100) {
+    if (!wm.fit || wm.pos === "tile" || wm.pos === "top" || wm.pos === "bottom") return wm.size;
+    const target = wm.pos === "diag" ? Math.hypot(pw, ph) * 0.72 : pw * 0.8;
+    return clamp(target / Math.max(1, widthAt100) * 100, 8, 220);
+  },
+  /* positions (centres) et angle en degrés, sens trigonométrique, repère « écran » */
+  places(pw, ph, wm, w, h) {
+    const diag = Math.atan2(ph, pw) * 180 / Math.PI;
+    switch (wm.pos) {
+      case "diag": return [{ cx: pw / 2, cy: ph / 2, a: diag }];
+      case "top": return [{ cx: pw / 2, cy: Math.max(h / 2 + 14, ph * 0.06), a: 0 }];
+      case "bottom": return [{ cx: pw / 2, cy: ph - Math.max(h / 2 + 14, ph * 0.06), a: 0 }];
+      case "tile": {
+        const out = [], sx = w * 1.25 + 40, sy = h * 3.2 + 40;
+        for (let y = sy / 2, r = 0; y < ph + sy; y += sy, r++)
+          for (let x = (r % 2 ? sx / 2 : 0); x < pw + sx; x += sx) out.push({ cx: x, cy: y, a: 30 });
+        return out;
+      }
+      default: return [{ cx: pw / 2, cy: ph / 2, a: 0 }];
+    }
+  },
+  measure(text, font, bold, size) {
+    const c = measure._c || (measure._c = document.createElement("canvas").getContext("2d"));
+    c.font = (bold ? "bold " : "") + size + "px " + CSS_FONT[font];
+    return c.measureText(text).width;
+  },
+  /* aperçu dans l'éditeur */
+  render() {
+    $$(".wmk").forEach(e => e.remove());
+    const wm = S.wm; if (!wm) return;
+    S.pages.forEach((p, i) => {
+      if (!p.layer || (wm.pages === "first" && i > 0)) return;
+      let w, h, size = 0;
+      if (wm.type === "image" && wm.src) { w = p.dw * wm.scale; h = w * wm.ratio; }
+      else {
+        size = WM.size(p.dw, p.dh, wm, WM.measure(wm.text, wm.font, wm.bold, 100));
+        w = WM.measure(wm.text, wm.font, wm.bold, size); h = size;
+      }
+      for (const q of WM.places(p.dw, p.dh, wm, w, h)) {
+        const d = document.createElement("div");
+        d.className = "wmk";
+        d.style.left = (q.cx * S.scale) + "px"; d.style.top = (q.cy * S.scale) + "px";
+        d.style.opacity = wm.opacity;
+        d.style.transform = "translate(-50%,-50%) rotate(" + (-q.a) + "deg)";
+        if (wm.type === "image" && wm.src) {
+          const im = document.createElement("img"); im.src = wm.src; im.alt = "";
+          im.style.width = (w * S.scale) + "px"; im.style.height = (h * S.scale) + "px";
+          d.appendChild(im);
+        } else {
+          d.textContent = wm.text; d.style.color = wm.color;
+          d.style.font = (wm.bold ? "bold " : "") + (size * S.scale) + "px " + CSS_FONT[wm.font];
+        }
+        p.layer.prepend(d);
+      }
+    });
+  },
+  /* dessin dans le PDF (pdf-lib) */
+  async draw(doc, page, g, idx, fonts) {
+    const wm = S.wm; if (!wm || (wm.pages === "first" && idx > 0)) return;
+    const L = window.PDFLib;
+    const pw = (g.rot === 90 || g.rot === 270) ? g.ph : g.pw, ph = (g.rot === 90 || g.rot === 270) ? g.pw : g.ph;
+    const geo = (q, w, h, upShift) => {
+      const a = q.a * Math.PI / 180, dir = [Math.cos(a), -Math.sin(a)], up = [-Math.sin(a), -Math.cos(a)];
+      return mapPt(q.cx - dir[0] * w / 2 - up[0] * upShift, q.cy - dir[1] * w / 2 - up[1] * upShift, g);
+    };
+    if (wm.type === "image" && wm.src) {
+      const img = await embed(doc, wm.src); if (!img) return;
+      const w = pw * wm.scale, h = w * wm.ratio;
+      for (const q of WM.places(pw, ph, wm, w, h)) {
+        const P = geo(q, w, h, h / 2);
+        page.drawImage(img, { x: P[0], y: P[1], width: w, height: h, opacity: wm.opacity, rotate: L.degrees(g.rot + q.a) });
+      }
+      return;
+    }
+    const f = await getFont(doc, fonts, { font: wm.font, bold: wm.bold });
+    const t = clean(wm.text);
+    const size = WM.size(pw, ph, wm, f.widthOfTextAtSize(t, 100));
+    const w = f.widthOfTextAtSize(t, size), cap = size * 0.7;
+    for (const q of WM.places(pw, ph, wm, w, size)) {
+      const P = geo(q, w, cap, cap / 2);
+      page.drawText(t, { x: P[0], y: P[1], size, font: f, color: hexRgb(wm.color, L), opacity: wm.opacity,
+        rotate: L.degrees(g.rot + q.a) });
+    }
+  }
+};
+
+/* ======================================================== censure définitive
+   Les pages qui portent une zone censurée sont remplacées par une image où
+   les zones sont noircies : le texte et les images d'origine disparaissent
+   réellement (vérifiable : le texte n'est plus extractible). */
+const hasRedactions = () => S.items.some(it => it.type === "redact");
+async function burnRedactions(bytes) {
+  const pagesIdx = [...new Set(S.items.filter(it => it.type === "redact").map(it => it.page))].sort((a, b) => a - b);
+  if (!pagesIdx.length) return bytes;
+  const L = window.PDFLib;
+  const src = await pdfjsLib.getDocument({ data: bytes.slice(0), isEvalSupported: false }).promise;
+  const doc = await L.PDFDocument.load(bytes, { updateMetadata: false });
+  const cv = document.createElement("canvas"), cx = cv.getContext("2d", { alpha: false });
+  try {
+    for (const i of pagesIdx) {
+      busy(true, "Censure définitive — page " + (i + 1) + "…");
+      await yieldUI();
+      const pg = await src.getPage(i + 1);
+      const base = pg.getViewport({ scale: 1 });
+      let k = 200 / 72;
+      const cap = isIOS ? 9e6 : 16e6;
+      if (base.width * base.height * k * k > cap) k = Math.sqrt(cap / (base.width * base.height));
+      const vp = pg.getViewport({ scale: k });
+      cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+      cx.fillStyle = "#fff"; cx.fillRect(0, 0, cv.width, cv.height);
+      await pg.render({ canvasContext: cx, viewport: vp, intent: "print" }).promise;
+      /* sécurité : les zones sont repeintes en noir sur l'image, quoi qu'il arrive au rendu */
+      cx.fillStyle = "#000";
+      for (const it of S.items.filter(x => x.type === "redact" && x.page === i))
+        cx.fillRect(it.x * k - 1, it.y * k - 1, it.w * k + 2, it.h * k + 2);
+      const blob = await new Promise(r => cv.toBlob(r, "image/jpeg", 0.92));
+      const img = await doc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
+      doc.removePage(i);
+      const np = doc.insertPage(i, [base.width, base.height]);
+      np.drawImage(img, { x: 0, y: 0, width: base.width, height: base.height });
+      pg.cleanup();
+    }
+    await doc.flush();            /* les images sont réellement écrites avant le nettoyage */
+    pruneDangling(doc);
+    return await doc.save({ useObjectStreams: false });
+  } finally { cv.width = cv.height = 1; try { await src.destroy(); } catch (e) {} busy(false); }
+}
+
+/* =============================================== chiffrement AES-256 (R6)
+   Norme ISO 32000-2, gestionnaire de sécurité standard, révision 6.
+   Calculs faits par le navigateur (WebCrypto), rien n'est envoyé. */
+const Crypt = {
+  rnd: n => crypto.getRandomValues(new Uint8Array(n)),
+  cat(...a) { const o = new Uint8Array(a.reduce((s, x) => s + x.length, 0)); let p = 0; for (const x of a) { o.set(x, p); p += x.length; } return o; },
+  async sha(alg, d) { return new Uint8Array(await crypto.subtle.digest(alg, d)); },
+  async aesCbc(key, iv, data, noPad) {
+    const k = await crypto.subtle.importKey("raw", key, "AES-CBC", false, ["encrypt"]);
+    const out = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-CBC", iv }, k, data));
+    return noPad ? out.slice(0, data.length) : out;        /* sans remplissage : on retire le bloc ajouté */
+  },
+  /* algorithme 2.B (ISO 32000-2, 7.6.4.3.4) */
+  async hash(pwd, salt, udata) {
+    let k = await Crypt.sha("SHA-256", Crypt.cat(pwd, salt, udata)), e = new Uint8Array(0);
+    let i = 0;
+    while (i < 64 || e[e.length - 1] > i - 32) {
+      const k1 = Crypt.cat(pwd, k, udata), big = new Uint8Array(k1.length * 64);
+      for (let j = 0; j < 64; j++) big.set(k1, j * k1.length);
+      e = await Crypt.aesCbc(k.slice(0, 16), k.slice(16, 32), big, true);
+      let s = 0; for (let j = 0; j < 16; j++) s += e[j];
+      k = await Crypt.sha(["SHA-256", "SHA-384", "SHA-512"][s % 3], e);
+      i++;
+    }
+    return k.slice(0, 32);
+  },
+  hex: b => Array.from(b, x => x.toString(16).padStart(2, "0")).join("")
+};
+async function encryptPdf(bytes, password) {
+  if (!window.crypto || !crypto.subtle) throw new Error("chiffrement indisponible (connexion non sécurisée)");
+  const L = window.PDFLib;
+  const pwd = new TextEncoder().encode(password).slice(0, 127);
+  const fileKey = Crypt.rnd(32);
+  /* U, UE */
+  const uvs = Crypt.rnd(8), uks = Crypt.rnd(8);
+  const U = Crypt.cat(await Crypt.hash(pwd, uvs, new Uint8Array(0)), uvs, uks);
+  const UE = await Crypt.aesCbc(await Crypt.hash(pwd, uks, new Uint8Array(0)), new Uint8Array(16), fileKey, true);
+  /* O, OE (mot de passe propriétaire = même mot de passe) */
+  const ovs = Crypt.rnd(8), oks = Crypt.rnd(8);
+  const O = Crypt.cat(await Crypt.hash(pwd, ovs, U), ovs, oks);
+  const OE = await Crypt.aesCbc(await Crypt.hash(pwd, oks, U), new Uint8Array(16), fileKey, true);
+  /* Perms : P (tous droits) + « adb », chiffré AES-256 en mode ECB (un bloc = CBC à IV nul) */
+  const P = -4;
+  const perms = new Uint8Array(16);
+  new DataView(perms.buffer).setInt32(0, P, true);
+  perms.set([0xFF, 0xFF, 0xFF, 0xFF, 0x54, 0x61, 0x64, 0x62], 4);
+  perms.set(Crypt.rnd(4), 12);
+  const Perms = await Crypt.aesCbc(fileKey, new Uint8Array(16), perms, true);
+
+  const doc = await L.PDFDocument.load(bytes, { updateMetadata: false });
+  const ctx = doc.context;
+  const encBytes = async d => { const iv = Crypt.rnd(16); return Crypt.cat(iv, await Crypt.aesCbc(fileKey, iv, d)); };
+  const encObj = async o => {
+    if (o instanceof L.PDFString || o instanceof L.PDFHexString) return L.PDFHexString.of(Crypt.hex(await encBytes(o.asBytes())));
+    if (o instanceof L.PDFDict) { for (const [k, v] of o.entries()) o.set(k, await encObj(v)); return o; }
+    if (o instanceof L.PDFArray) { for (let i = 0; i < o.size(); i++) o.set(i, await encObj(o.get(i))); return o; }
+    return o;
+  };
+  for (const [ref, obj] of ctx.enumerateIndirectObjects()) {
+    if (obj instanceof L.PDFRawStream) {
+      await encObj(obj.dict);
+      ctx.assign(ref, L.PDFRawStream.of(obj.dict, await encBytes(obj.contents)));
+    } else if (obj instanceof L.PDFStream) {
+      throw new Error("flux non pris en charge pour le chiffrement");
+    } else await encObj(obj);
+  }
+  const hexs = b => L.PDFHexString.of(Crypt.hex(b));
+  const encDict = ctx.obj({
+    Filter: "Standard", V: 5, R: 6, Length: 256, P,
+    CF: { StdCF: { AuthEvent: "DocOpen", CFM: "AESV3", Length: 32 } }, StmF: "StdCF", StrF: "StdCF",
+    EncryptMetadata: true
+  });
+  encDict.set(L.PDFName.of("O"), hexs(O)); encDict.set(L.PDFName.of("U"), hexs(U));
+  encDict.set(L.PDFName.of("OE"), hexs(OE)); encDict.set(L.PDFName.of("UE"), hexs(UE));
+  encDict.set(L.PDFName.of("Perms"), hexs(Perms));
+  const encRef = ctx.register(encDict);
+  ctx.trailerInfo.Encrypt = encRef;
+  const id = hexs(Crypt.rnd(16));
+  ctx.trailerInfo.ID = ctx.obj([id, id]);
+  return doc.save({ useObjectStreams: false, addDefaultPage: false, updateFieldAppearances: false });
+}
+
+/* ===================================================== PDF/A-2b
+   Pages converties en images (aucune police à intégrer), profil de couleur
+   sRGB v2 généré pour l'application, métadonnées XMP déclarant PDF/A-2B. */
+const SRGB_ICC_B64 = "AAAJ3GxjbXMCEAAAbW50clJHQiBYWVogAAAAAAAAAAAAAAAAYWNzcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPbWAAEAAAAA0y0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJZGVzYwAAAPAAAABsY3BydAAAAVwAAAAkd3RwdAAAAYAAAAAUclhZWgAAAZQAAAAUZ1hZWgAAAagAAAAUYlhZWgAAAbwAAAAUclRSQwAAAdAAAAgMZ1RSQwAAAdAAAAgMYlRSQwAAAdAAAAgMZGVzYwAAAAAAAAASc1JHQiBJRUM2MTk2Ni0yLjEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAdGV4dAAAAABObyBjb3B5cmlnaHQsIHVzZSBmcmVlbHkAAAAAWFlaIAAAAAAAAPbWAAEAAAAA0y1YWVogAAAAAAAAb6QAADj2AAADj1hZWiAAAAAAAABilgAAt4cAABjcWFlaIAAAAAAAACSiAAAPgwAAts9jdXJ2AAAAAAAABAAAAAAFAAoADwAUABkAHgAjACgALQAyADcAOwBAAEUASgBPAFQAWQBeAGMAaABtAHIAdwB8AIEAhgCLAJAAlQCaAJ8ApACpAK4AsgC3ALwAwQDGAMsA0ADVANsA4ADlAOsA8AD2APsBAQEHAQ0BEwEZAR8BJQErATIBOAE+AUUBTAFSAVkBYAFnAW4BdQF8AYMBiwGSAZoBoQGpAbEBuQHBAckB0QHZAeEB6QHyAfoCAwIMAhQCHQImAi8COAJBAksCVAJdAmcCcQJ6AoQCjgKYAqICrAK2AsECywLVAuAC6wL1AwADCwMWAyEDLQM4A0MDTwNaA2YDcgN+A4oDlgOiA64DugPHA9MD4APsA/kEBgQTBCAELQQ7BEgEVQRjBHEEfgSMBJoEqAS2BMQE0wThBPAE/gUNBRwFKwU6BUkFWAVnBXcFhgWWBaYFtQXFBdUF5QX2BgYGFgYnBjcGSAZZBmoGewaMBp0GrwbABtEG4wb1BwcHGQcrBz0HTwdhB3QHhgeZB6wHvwfSB+UH+AgLCB8IMghGCFoIbgiCCJYIqgi+CNII5wj7CRAJJQk6CU8JZAl5CY8JpAm6Cc8J5Qn7ChEKJwo9ClQKagqBCpgKrgrFCtwK8wsLCyILOQtRC2kLgAuYC7ALyAvhC/kMEgwqDEMMXAx1DI4MpwzADNkM8w0NDSYNQA1aDXQNjg2pDcMN3g34DhMOLg5JDmQOfw6bDrYO0g7uDwkPJQ9BD14Peg+WD7MPzw/sEAkQJhBDEGEQfhCbELkQ1xD1ERMRMRFPEW0RjBGqEckR6BIHEiYSRRJkEoQSoxLDEuMTAxMjE0MTYxODE6QTxRPlFAYUJxRJFGoUixStFM4U8BUSFTQVVhV4FZsVvRXgFgMWJhZJFmwWjxayFtYW+hcdF0EXZReJF64X0hf3GBsYQBhlGIoYrxjVGPoZIBlFGWsZkRm3Gd0aBBoqGlEadxqeGsUa7BsUGzsbYxuKG7Ib2hwCHCocUhx7HKMczBz1HR4dRx1wHZkdwx3sHhYeQB5qHpQevh7pHxMfPh9pH5Qfvx/qIBUgQSBsIJggxCDwIRwhSCF1IaEhziH7IiciVSKCIq8i3SMKIzgjZiOUI8Ij8CQfJE0kfCSrJNolCSU4JWgllyXHJfcmJyZXJocmtyboJxgnSSd6J6sn3CgNKD8ocSiiKNQpBik4KWspnSnQKgIqNSpoKpsqzysCKzYraSudK9EsBSw5LG4soizXLQwtQS12Last4S4WLkwugi63Lu4vJC9aL5Evxy/+MDUwbDCkMNsxEjFKMYIxujHyMioyYzKbMtQzDTNGM38zuDPxNCs0ZTSeNNg1EzVNNYc1wjX9Njc2cjauNuk3JDdgN5w31zgUOFA4jDjIOQU5Qjl/Obw5+To2OnQ6sjrvOy07azuqO+g8JzxlPKQ84z0iPWE9oT3gPiA+YD6gPuA/IT9hP6I/4kAjQGRApkDnQSlBakGsQe5CMEJyQrVC90M6Q31DwEQDREdEikTORRJFVUWaRd5GIkZnRqtG8Ec1R3tHwEgFSEtIkUjXSR1JY0mpSfBKN0p9SsRLDEtTS5pL4kwqTHJMuk0CTUpNk03cTiVObk63TwBPSU+TT91QJ1BxULtRBlFQUZtR5lIxUnxSx1MTU19TqlP2VEJUj1TbVShVdVXCVg9WXFapVvdXRFeSV+BYL1h9WMtZGllpWbhaB1pWWqZa9VtFW5Vb5Vw1XIZc1l0nXXhdyV4aXmxevV8PX2Ffs2AFYFdgqmD8YU9homH1YklinGLwY0Njl2PrZEBklGTpZT1lkmXnZj1mkmboZz1nk2fpaD9olmjsaUNpmmnxakhqn2r3a09rp2v/bFdsr20IbWBtuW4SbmtuxG8eb3hv0XArcIZw4HE6cZVx8HJLcqZzAXNdc7h0FHRwdMx1KHWFdeF2Pnabdvh3VnezeBF4bnjMeSp5iXnnekZ6pXsEe2N7wnwhfIF84X1BfaF+AX5ifsJ/I3+Ef+WAR4CogQqBa4HNgjCCkoL0g1eDuoQdhICE44VHhauGDoZyhteHO4efiASIaYjOiTOJmYn+imSKyoswi5aL/IxjjMqNMY2Yjf+OZo7OjzaPnpAGkG6Q1pE/kaiSEZJ6kuOTTZO2lCCUipT0lV+VyZY0lp+XCpd1l+CYTJi4mSSZkJn8mmia1ZtCm6+cHJyJnPedZJ3SnkCerp8dn4uf+qBpoNihR6G2oiailqMGo3aj5qRWpMelOKWpphqmi6b9p26n4KhSqMSpN6mpqhyqj6sCq3Wr6axcrNCtRK24ri2uoa8Wr4uwALB1sOqxYLHWskuywrM4s660JbSctRO1irYBtnm28Ldot+C4WbjRuUq5wro7urW7LrunvCG8m70VvY++Cr6Evv+/er/1wHDA7MFnwePCX8Lbw1jD1MRRxM7FS8XIxkbGw8dBx7/IPci8yTrJuco4yrfLNsu2zDXMtc01zbXONs62zzfPuNA50LrRPNG+0j/SwdNE08bUSdTL1U7V0dZV1tjXXNfg2GTY6Nls2fHadtr724DcBdyK3RDdlt4c3qLfKd+v4DbgveFE4cziU+Lb42Pj6+Rz5PzlhOYN5pbnH+ep6DLovOlG6dDqW+rl63Dr++yG7RHtnO4o7rTvQO/M8Fjw5fFy8f/yjPMZ86f0NPTC9VD13vZt9vv3ivgZ+Kj5OPnH+lf65/t3/Af8mP0p/br+S/7c/23//w==";
+async function buildPdfA(bytes, title) {
+  const L = window.PDFLib;
+  const imgs = await renderPages(bytes.slice(0), 200, "jpg", (i, n) => busy(true, "PDF/A — page " + i + " sur " + n + "…"));
+  const doc = await L.PDFDocument.create({ updateMetadata: false });
+  for (const im of imgs) {
+    const img = await doc.embedJpg(new Uint8Array(await im.blob.arrayBuffer()));
+    doc.addPage([im.pw, im.ph]).drawImage(img, { x: 0, y: 0, width: im.pw, height: im.ph });
+  }
+  const now = new Date(); now.setMilliseconds(0);
+  const iso = now.toISOString().replace(/\.\d+Z$/, "Z");
+  doc.setTitle(title); doc.setProducer("LeSacAPDF"); doc.setCreator("LeSacAPDF");
+  doc.setCreationDate(now); doc.setModificationDate(now);
+  const ctx = doc.context;
+  const icc = Uint8Array.from(atob(SRGB_ICC_B64), c => c.charCodeAt(0));
+  const iccRef = ctx.register(ctx.flateStream(icc, { N: 3 }));
+  const oi = ctx.obj({ Type: "OutputIntent", S: "GTS_PDFA1", DestOutputProfile: iccRef });
+  oi.set(L.PDFName.of("OutputConditionIdentifier"), L.PDFString.of("sRGB IEC61966-2.1"));
+  oi.set(L.PDFName.of("Info"), L.PDFString.of("sRGB IEC61966-2.1"));
+  doc.catalog.set(L.PDFName.of("OutputIntents"), ctx.obj([ctx.register(oi)]));
+  const x = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const xmp = '<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>\n' +
+    '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">' +
+    '<rdf:Description rdf:about="" xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/" xmlns:dc="http://purl.org/dc/elements/1.1/" ' +
+    'xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmlns:pdf="http://ns.adobe.com/pdf/1.3/">' +
+    '<pdfaid:part>2</pdfaid:part><pdfaid:conformance>B</pdfaid:conformance>' +
+    '<dc:format>application/pdf</dc:format><dc:title><rdf:Alt><rdf:li xml:lang="x-default">' + x(title) + '</rdf:li></rdf:Alt></dc:title>' +
+    '<xmp:CreatorTool>LeSacAPDF</xmp:CreatorTool><xmp:CreateDate>' + iso + '</xmp:CreateDate><xmp:ModifyDate>' + iso + '</xmp:ModifyDate>' +
+    '<xmp:MetadataDate>' + iso + '</xmp:MetadataDate><pdf:Producer>LeSacAPDF</pdf:Producer>' +
+    '</rdf:Description></rdf:RDF></x:xmpmeta>\n<?xpacket end="w"?>';
+  const meta = ctx.stream(new TextEncoder().encode(xmp), { Type: "Metadata", Subtype: "XML" });
+  doc.catalog.set(L.PDFName.of("Metadata"), ctx.register(meta));
+  const id = L.PDFHexString.of(Crypt.hex(Crypt.rnd(16)));
+  ctx.trailerInfo.ID = ctx.obj([id, id]);
+  return doc.save({ useObjectStreams: false });
+}
+
+/* ===================================================== PowerPoint (.pptx)
+   Une diapositive par page : image fidèle de la page, ou texte modifiable. */
+async function buildPptx(bytes, title, mode) {
+  const imgs = await renderPages(bytes.slice(0), 150, "jpg", (i, n) => busy(true, "Diapositive " + i + " sur " + n + "…"));
+  const texts = mode === "text" ? await extractText(bytes.slice(0)) : null;
+  const E = 12700;                               /* 1 point = 12 700 EMU */
+  const W = Math.round(imgs[0].pw * E), H = Math.round(imgs[0].ph * E);
+  const NS = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"';
+  const hdr = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  const RT = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
+  const files = [], slideIds = [], presRels = [], ctOver = [];
+  const spTree = inner => '<p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>' +
+    '<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>' + inner + "</p:spTree></p:cSld>";
+  for (let i = 0; i < imgs.length; i++) {
+    const n = i + 1, im = imgs[i];
+    /* chaque diapositive garde le format de la page, centrée si les pages diffèrent */
+    let cx = W, cy = Math.round(W * im.ph / im.pw);
+    if (cy > H) { cy = H; cx = Math.round(H * im.pw / im.ph); }
+    const ox = Math.round((W - cx) / 2), oy = Math.round((H - cy) / 2);
+    let inner, rels = '<Relationship Id="rId1" Type="' + RT + 'slideLayout" Target="../slideLayouts/slideLayout1.xml"/>';
+    if (mode === "text") {
+      const paras = (texts[i] || []).map(p => {
+        const sz = Math.round(clamp(p.size, 8, 40) * 100);
+        return "<a:p>" + p.lines.map((l, k) => (k ? "<a:br><a:rPr lang=\"fr-FR\" sz=\"" + sz + "\"/></a:br>" : "") +
+          '<a:r><a:rPr lang="fr-FR" sz="' + sz + '" dirty="0"/><a:t>' + xe(l) + "</a:t></a:r>").join("") + "</a:p>";
+      }).join("") || "<a:p><a:endParaRPr lang=\"fr-FR\"/></a:p>";
+      const m = Math.round(0.05 * W);
+      inner = '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Texte"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="' + m + '" y="' + m +
+        '"/><a:ext cx="' + (W - 2 * m) + '" cy="' + (H - 2 * m) + '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>' +
+        '<p:txBody><a:bodyPr wrap="square"><a:normAutofit/></a:bodyPr><a:lstStyle/>' + paras + "</p:txBody></p:sp>";
+    } else {
+      files.push({ name: "ppt/media/page" + n + ".jpg", data: new Uint8Array(await im.blob.arrayBuffer()) });
+      rels += '<Relationship Id="rId2" Type="' + RT + 'image" Target="../media/page' + n + '.jpg"/>';
+      inner = '<p:pic><p:nvPicPr><p:cNvPr id="2" name="Page ' + n + '"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>' +
+        '<p:blipFill><a:blip r:embed="rId2"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="' + ox + '" y="' + oy +
+        '"/><a:ext cx="' + cx + '" cy="' + cy + '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>';
+    }
+    files.push({ name: "ppt/slides/slide" + n + ".xml", data: hdr + "<p:sld " + NS + ">" + spTree(inner) + "<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>" });
+    files.push({ name: "ppt/slides/_rels/slide" + n + ".xml.rels", data: hdr + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + rels + "</Relationships>" });
+    slideIds.push('<p:sldId id="' + (255 + n) + '" r:id="rId' + (n + 1) + '"/>');
+    presRels.push('<Relationship Id="rId' + (n + 1) + '" Type="' + RT + 'slide" Target="slides/slide' + n + '.xml"/>');
+    ctOver.push('<Override PartName="/ppt/slides/slide' + n + '.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>');
+  }
+  const theme = hdr + '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="LeSacAPDF"><a:themeElements>' +
+    '<a:clrScheme name="LeSacAPDF"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>' +
+    '<a:dk2><a:srgbClr val="1B3558"/></a:dk2><a:lt2><a:srgbClr val="EEF1F5"/></a:lt2><a:accent1><a:srgbClr val="2D6CDF"/></a:accent1><a:accent2><a:srgbClr val="E5484D"/></a:accent2>' +
+    '<a:accent3><a:srgbClr val="C98B4E"/></a:accent3><a:accent4><a:srgbClr val="1E8E55"/></a:accent4><a:accent5><a:srgbClr val="9B51E0"/></a:accent5><a:accent6><a:srgbClr val="0F9BB0"/></a:accent6>' +
+    '<a:hlink><a:srgbClr val="2D6CDF"/></a:hlink><a:folHlink><a:srgbClr val="9B51E0"/></a:folHlink></a:clrScheme>' +
+    '<a:fontScheme name="LeSacAPDF"><a:majorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont>' +
+    '<a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme>' +
+    '<a:fmtScheme name="LeSacAPDF"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst>' +
+    '<a:lnStyleLst><a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln><a:ln w="25400"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln><a:ln w="38100"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln></a:lnStyleLst>' +
+    '<a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst>' +
+    '<a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst>' +
+    "</a:fmtScheme></a:themeElements></a:theme>";
+  const master = hdr + "<p:sldMaster " + NS + "><p:cSld><p:bg><p:bgRef idx=\"1001\"><a:schemeClr val=\"bg1\"/></p:bgRef></p:bg>" + spTree("").replace("<p:cSld>", "").replace("</p:cSld>", "") +
+    '</p:cSld><p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/>' +
+    '<p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst></p:sldMaster>';
+  const layout = hdr + "<p:sldLayout " + NS + ' type="blank" preserve="1">' + spTree("").replace("<p:cSld>", '<p:cSld name="Vide">') + "<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>";
+  const rel = (id, type, target) => '<Relationship Id="' + id + '" Type="' + RT + type + '" Target="' + target + '"/>';
+  const rels = x => hdr + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + x + "</Relationships>";
+  const pres = hdr + "<p:presentation " + NS + ' saveSubsetFonts="1"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>' +
+    "<p:sldIdLst>" + slideIds.join("") + '</p:sldIdLst><p:sldSz cx="' + W + '" cy="' + H + '"/><p:notesSz cx="6858000" cy="9144000"/></p:presentation>';
+  const ct = hdr + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+    '<Default Extension="xml" ContentType="application/xml"/><Default Extension="jpg" ContentType="image/jpeg"/>' +
+    '<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>' +
+    '<Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>' +
+    '<Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>' +
+    '<Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>' +
+    '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>' + ctOver.join("") + "</Types>";
+  const core = hdr + '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" ' +
+    'xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>' + xe(title) + '</dc:title><dc:creator>LeSacAPDF</dc:creator>' +
+    '<dcterms:created xsi:type="dcterms:W3CDTF">' + new Date().toISOString().slice(0, 19) + "Z</dcterms:created></cp:coreProperties>";
+  return zipStore([
+    { name: "[Content_Types].xml", data: ct },
+    { name: "_rels/.rels", data: rels(rel("rId1", "officeDocument", "ppt/presentation.xml") +
+      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>') },
+    { name: "docProps/core.xml", data: core },
+    { name: "ppt/presentation.xml", data: pres },
+    { name: "ppt/_rels/presentation.xml.rels", data: rels(rel("rId1", "slideMaster", "slideMasters/slideMaster1.xml") + presRels.join("") +
+      rel("rId" + (imgs.length + 2), "theme", "theme/theme1.xml")) },
+    { name: "ppt/slideMasters/slideMaster1.xml", data: master },
+    { name: "ppt/slideMasters/_rels/slideMaster1.xml.rels", data: rels(rel("rId1", "slideLayout", "../slideLayouts/slideLayout1.xml") + rel("rId2", "theme", "../theme/theme1.xml")) },
+    { name: "ppt/slideLayouts/slideLayout1.xml", data: layout },
+    { name: "ppt/slideLayouts/_rels/slideLayout1.xml.rels", data: rels(rel("rId1", "slideMaster", "../slideMasters/slideMaster1.xml")) },
+    { name: "ppt/theme/theme1.xml", data: theme }
+  ].concat(files));
+}
+
+/* ============================================================ Excel (.xlsx)
+   Une feuille par page ; chaque ligne de texte devient une ligne du tableur,
+   découpée en colonnes selon l'alignement horizontal du texte. */
+async function extractCells(bytes) {
+  const doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+  const sheets = [];
+  try {
+    for (let i = 1; i <= doc.numPages; i++) {
+      const pg = await doc.getPage(i), vp = pg.getViewport({ scale: 1 }), tc = await pg.getTextContent();
+      const items = [];
+      for (const it of tc.items) {
+        if (!it.str || !it.str.trim()) continue;
+        const [a, b, c, d, e, f] = it.transform;
+        const p0 = vp.convertToViewportPoint(e, f);
+        items.push({ s: it.str, x: p0[0], y: p0[1], h: Math.hypot(c, d) || 10, w: it.width || 0 });
+      }
+      items.sort((p, q) => p.y - q.y || p.x - q.x);
+      const lines = [];
+      for (const it of items) {
+        const L0 = lines[lines.length - 1];
+        if (L0 && Math.abs(it.y - L0.y) < Math.max(it.h, L0.h) * 0.5) L0.items.push(it);
+        else lines.push({ y: it.y, h: it.h, items: [it] });
+      }
+      /* cellules : un grand écart horizontal sépare deux cellules */
+      const rows = lines.map(L0 => {
+        L0.items.sort((p, q) => p.x - q.x);
+        const cells = [];
+        for (const it of L0.items) {
+          const c = cells[cells.length - 1];
+          if (c && it.x - c.end < it.h * 1.2) { c.s += (it.x - c.end > it.h * 0.18 && !/\s$/.test(c.s) ? " " : "") + it.s; c.end = it.x + it.w; }
+          else cells.push({ s: it.s, x: it.x, end: it.x + it.w });
+        }
+        return cells.map(c => ({ s: c.s.replace(/\s+/g, " ").trim(), x: c.x }));
+      });
+      /* colonnes : positions de départ regroupées sur toute la page */
+      const xs = rows.flat().map(c => c.x).sort((a, b) => a - b), cols = [];
+      for (const x of xs) { if (!cols.length || x - cols[cols.length - 1] > 14) cols.push(x); }
+      const colOf = x => { let best = 0; cols.forEach((c, k) => { if (Math.abs(c - x) < Math.abs(cols[best] - x)) best = k; }); return best; };
+      sheets.push(rows.map(r => {
+        const out = [];
+        for (const c of r) { let k = colOf(c.x); while (out[k] !== undefined) k++; out[k] = c.s; }
+        return out;
+      }));
+      pg.cleanup();
+    }
+  } finally { try { await doc.destroy(); } catch (e) {} }
+  return sheets;
+}
+function buildXlsx(sheets, title) {
+  const hdr = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  const col = n => { let s = ""; n++; while (n) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = (n - m - 1) / 26; } return s; };
+  /* nombres au format français : « 1 234,56 », « 120,00 € », « 12 % » */
+  /* renvoie { v, st } : st = 1 (euros) ou 2 (pourcentage) pour le format de cellule */
+  const num = s => {
+    const raw = s.replace(/[   ]/g, ""), eur = /€$/.test(raw), t = raw.replace(/€$/, "");
+    if (!/^-?\d+(?:[.,]\d+)?%?$/.test(t)) return null;
+    const v = parseFloat(t.replace(",", ".").replace("%", ""));
+    if (!isFinite(v)) return null;
+    return t.endsWith("%") ? { v: v / 100, st: 2 } : { v, st: eur ? 1 : 0 };
+  };
+  const files = [], wbSheets = [], wbRels = [], ctOver = [];
+  const list = sheets.length ? sheets : [[]];
+  list.forEach((rows, i) => {
+    const n = i + 1;
+    let maxC = 0;
+    const widths = [];
+    const xmlRows = rows.map((r, ri) => {
+      maxC = Math.max(maxC, r.length);
+      const cells = [];
+      r.forEach((v, ci) => {
+        if (v === undefined || v === "") return;
+        widths[ci] = Math.max(widths[ci] || 8, Math.min(60, v.length + 2));
+        const ref = col(ci) + (ri + 1), nv = num(v);
+        cells.push(nv !== null ? '<c r="' + ref + '"' + (nv.st ? ' s="' + nv.st + '"' : "") + "><v>" + nv.v + "</v></c>"
+          : '<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' + xe(v) + "</t></is></c>");
+      });
+      return '<row r="' + (ri + 1) + '">' + cells.join("") + "</row>";
+    }).join("");
+    const colsXml = widths.length ? "<cols>" + widths.map((w, k) => w ? '<col min="' + (k + 1) + '" max="' + (k + 1) + '" width="' + w + '" customWidth="1"/>' : "").join("") + "</cols>" : "";
+    files.push({ name: "xl/worksheets/sheet" + n + ".xml", data: hdr + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+      colsXml + "<sheetData>" + xmlRows + "</sheetData></worksheet>" });
+    wbSheets.push('<sheet name="Page ' + n + '" sheetId="' + n + '" r:id="rId' + n + '"/>');
+    wbRels.push('<Relationship Id="rId' + n + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + n + '.xml"/>');
+    ctOver.push('<Override PartName="/xl/worksheets/sheet' + n + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>');
+  });
+  const S2 = list.length + 1;
+  const styles = hdr + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0.00\\ &quot;€&quot;"/></numFmts><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>' +
+    '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders>' +
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+    '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+    '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
+    '<xf numFmtId="9" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs>' +
+    '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+  return zipStore([
+    { name: "[Content_Types].xml", data: hdr + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+      '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' + ctOver.join("") + "</Types>" },
+    { name: "_rels/.rels", data: hdr + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+    { name: "xl/workbook.xml", data: hdr + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>' + wbSheets.join("") + "</sheets></workbook>" },
+    { name: "xl/_rels/workbook.xml.rels", data: hdr + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + wbRels.join("") +
+      '<Relationship Id="rId' + S2 + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
+    { name: "xl/styles.xml", data: styles }
+  ].concat(files));
+}
+
+/* ================================================ conversion vers PDF
+   Images : intégrées telles quelles (texte des images non reconnu).
+   HTML, Word (.docx), OpenDocument (.odt), PowerPoint (.pptx) : mis en page
+   puis convertis en images de pages (texte non sélectionnable).          */
+const loadScript = src => new Promise((res, rej) => {
+  if (document.querySelector('script[data-src="' + src + '"]')) { res(); return; }
+  const s = document.createElement("script"); s.src = src; s.dataset.src = src;
+  s.onload = res; s.onerror = () => rej(new Error("module « " + src + " » indisponible"));
+  document.head.appendChild(s);
+});
+
+/* --- lecture d'une archive ZIP (DOCX, ODT, PPTX) */
+async function unzip(buf) {
+  const u8 = new Uint8Array(buf), dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 66000); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error("archive illisible");
+  const n = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const dec = new TextDecoder(), entries = {};
+  for (let k = 0; k < n; k++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true);
+    const nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true);
+    const lho = dv.getUint32(p + 42, true);
+    entries[dec.decode(u8.subarray(p + 46, p + 46 + nl))] = { method, csize, lho };
+    p += 46 + nl + xl + cl;
+  }
+  const get = async name => {
+    const e = entries[name]; if (!e) return null;
+    const start = e.lho + 30 + dv.getUint16(e.lho + 26, true) + dv.getUint16(e.lho + 28, true);
+    const data = u8.subarray(start, start + e.csize);
+    if (e.method === 0) return data.slice();
+    if (e.method !== 8) throw new Error("compression non prise en charge");
+    if (typeof DecompressionStream !== "function") throw new Error("navigateur trop ancien pour ce format");
+    return new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+  };
+  return { names: Object.keys(entries), get, text: async n => { const d = await get(n); return d ? dec.decode(d) : null; } };
+}
+const xmlDoc = s => new DOMParser().parseFromString(s, "application/xml");
+const kids = (el, name) => Array.from(el ? el.children : []).filter(c => !name || c.localName === name);
+const attr = (el, name) => { if (!el) return null; for (const a of el.attributes) if (a.localName === name) return a.value; return null; };
+const blobUrl = (data, type) => URL.createObjectURL(new Blob([data], { type }));
+const imgType = n => /\.png$/i.test(n) ? "image/png" : /\.gif$/i.test(n) ? "image/gif" : /\.svg$/i.test(n) ? "image/svg+xml" : "image/jpeg";
+
+/* --- nettoyage d'un HTML importé : ni script, ni contenu actif */
+function sanitizeHtml(html) {
+  const d = new DOMParser().parseFromString(html, "text/html");
+  d.querySelectorAll("script,iframe,object,embed,link[rel=import],meta[http-equiv],base,form").forEach(e => e.remove());
+  d.querySelectorAll("*").forEach(e => {
+    for (const a of Array.from(e.attributes)) {
+      if (/^on/i.test(a.name) || /^\s*javascript:/i.test(a.value)) e.removeAttribute(a.name);
+    }
+  });
+  const css = Array.from(d.querySelectorAll("style")).map(s => s.outerHTML).join("");
+  return { css, body: d.body ? d.body.innerHTML : "" };
+}
+
+/* --- rendu HTML -> images de pages A4 (html2canvas) */
+const A4 = { w: 595.28, h: 841.89 };
+async function renderHtmlPages(bodyHtml, css, opts) {
+  await loadScript("vendor/html2canvas.min.js");
+  opts = opts || {};
+  const pxW = opts.pxW || 794, pxH = opts.pxH || 1123;
+  const ifr = document.createElement("iframe");
+  ifr.setAttribute("sandbox", "allow-same-origin");
+  ifr.style.cssText = "position:fixed;left:-20000px;top:0;width:" + pxW + "px;height:" + pxH + "px;border:0;background:#fff";
+  ifr.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><style>' +
+    (opts.raw ? "html,body{margin:0;padding:0;background:#fff}" :
+      "html{background:#fff}body{margin:0;padding:56px 60px;font:11pt/1.45 Calibri,Carlito,Arial,sans-serif;color:#111;background:#fff;word-wrap:break-word}" +
+      "img{max-width:100%;height:auto}table{border-collapse:collapse;margin:8px 0}td,th{border:1px solid #9aa;padding:4px 6px;vertical-align:top}" +
+      "h1{font-size:20pt}h2{font-size:16pt}h3{font-size:13pt}p{margin:0 0 8px}") + "</style>" + (css || "") + "</head><body>" + bodyHtml + "</body></html>";
+  document.body.appendChild(ifr);
+  try {
+    await new Promise(r => { ifr.onload = r; setTimeout(r, 4000); });
+    const d = ifr.contentDocument;
+    await Promise.all(Array.from(d.images).map(im => im.complete ? 0 : new Promise(r => { im.onload = im.onerror = r; setTimeout(r, 3000); })));
+    if (d.fonts && d.fonts.ready) { try { await d.fonts.ready; } catch (e) {} }
+    const fullH = opts.raw ? pxH : Math.max(pxH, d.documentElement.scrollHeight);
+    ifr.style.height = fullH + "px";
+    const scale = Math.min(2, Math.sqrt((isIOS ? 9e6 : 16e6) / (pxW * fullH)) || 1);
+    const canvas = await window.html2canvas(d.documentElement, { scale: Math.max(0.5, scale), backgroundColor: "#ffffff",
+      width: pxW, height: fullH, windowWidth: pxW, windowHeight: fullH, logging: false, useCORS: true });
+    if (opts.raw) return [canvas];
+    /* découpage en pages : on coupe de préférence sur une ligne blanche */
+    const k = canvas.width / pxW, pageH = Math.round(pxH * k), out = [];
+    const cx = canvas.getContext("2d");
+    let y = 0;
+    while (y < canvas.height - 2) {
+      let cut = Math.min(canvas.height, y + pageH);
+      if (cut < canvas.height) {
+        const look = Math.round(160 * k), data = cx.getImageData(0, cut - look, canvas.width, look).data;
+        for (let r = look - 1; r > 0; r--) {
+          let white = true;
+          for (let c = 0; c < canvas.width; c += 3) { const i = (r * canvas.width + c) * 4; if (data[i] < 245 || data[i + 1] < 245 || data[i + 2] < 245) { white = false; break; } }
+          if (white) { cut = cut - look + r; break; }
+        }
+      }
+      const pc = document.createElement("canvas"); pc.width = canvas.width; pc.height = pageH;
+      const pcx = pc.getContext("2d"); pcx.fillStyle = "#fff"; pcx.fillRect(0, 0, pc.width, pc.height);
+      pcx.drawImage(canvas, 0, y, canvas.width, cut - y, 0, 0, canvas.width, cut - y);
+      out.push(pc);
+      y = cut;
+    }
+    return out;
+  } finally { ifr.remove(); }
+}
+async function canvasesToPdf(doc, canvases, w, h) {
+  for (const c of canvases) {
+    const blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.9));
+    const img = await doc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
+    const W = w || A4.w, H = h || A4.h;
+    doc.addPage([W, H]).drawImage(img, { x: 0, y: 0, width: W, height: H });
+    c.width = c.height = 1;
+  }
+}
+
+/* --- OpenDocument texte -> HTML */
+async function odtToHtml(zip) {
+  const x = xmlDoc(await zip.text("content.xml"));
+  const styles = {};
+  x.querySelectorAll("*").forEach(el => {
+    if (el.localName !== "style") return;
+    const name = attr(el, "name"); if (!name) return;
+    const tp = kids(el, "text-properties")[0], pp = kids(el, "paragraph-properties")[0];
+    let css = "";
+    if (tp) {
+      if (attr(tp, "font-weight") === "bold") css += "font-weight:bold;";
+      if (attr(tp, "font-style") === "italic") css += "font-style:italic;";
+      if (attr(tp, "font-size")) css += "font-size:" + attr(tp, "font-size") + ";";
+      if (attr(tp, "color")) css += "color:" + attr(tp, "color") + ";";
+      if (attr(tp, "text-underline-style") && attr(tp, "text-underline-style") !== "none") css += "text-decoration:underline;";
+    }
+    if (pp && attr(pp, "text-align")) css += "text-align:" + attr(pp, "text-align").replace("start", "left").replace("end", "right") + ";";
+    styles[name] = css;
+  });
+  const urls = {};
+  const conv = async el => {
+    let h = "";
+    for (const n of Array.from(el.childNodes)) {
+      if (n.nodeType === 3) { h += xe(n.nodeValue); continue; }
+      if (n.nodeType !== 1) continue;
+      const st = styles[attr(n, "style-name")] || "";
+      switch (n.localName) {
+        case "h": { const lv = clamp(+attr(n, "outline-level") || 1, 1, 6); h += "<h" + lv + ' style="' + st + '">' + await conv(n) + "</h" + lv + ">"; break; }
+        case "p": h += '<p style="' + st + '">' + (await conv(n) || "&nbsp;") + "</p>"; break;
+        case "span": h += '<span style="' + st + '">' + await conv(n) + "</span>"; break;
+        case "a": h += "<u>" + await conv(n) + "</u>"; break;
+        case "s": h += "&nbsp;".repeat(+attr(n, "c") || 1); break;
+        case "tab": h += "&emsp;"; break;
+        case "line-break": h += "<br>"; break;
+        case "list": h += "<ul>" + await conv(n) + "</ul>"; break;
+        case "list-item": h += "<li>" + await conv(n) + "</li>"; break;
+        case "table": h += "<table>" + await conv(n) + "</table>"; break;
+        case "table-row": h += "<tr>" + await conv(n) + "</tr>"; break;
+        case "table-cell": h += '<td colspan="' + (+attr(n, "number-columns-spanned") || 1) + '">' + await conv(n) + "</td>"; break;
+        case "frame": {
+          const im = kids(n, "image")[0], href = attr(im, "href");
+          if (href && !/^https?:/i.test(href)) {
+            if (!urls[href]) { const d = await zip.get(href); if (d) urls[href] = blobUrl(d, imgType(href)); }
+            const w = attr(n, "width");
+            if (urls[href]) h += '<img src="' + urls[href] + '" style="' + (w ? "width:" + w + ";" : "") + 'max-width:100%">';
+          } else h += await conv(n);
+          break;
+        }
+        case "table-columns": case "table-column": case "sequence-decls": case "tracked-changes": case "annotation": break;
+        default: h += await conv(n);
+      }
+    }
+    return h;
+  };
+  const text = x.getElementsByTagNameNS("urn:oasis:names:tc:opendocument:xmlns:office:1.0", "text")[0];
+  return { body: text ? await conv(text) : "", urls: Object.values(urls) };
+}
+
+/* --- PowerPoint (.pptx) -> une page par diapositive */
+async function pptxToCanvases(zip, onSlide) {
+  const pres = xmlDoc(await zip.text("ppt/presentation.xml"));
+  const sz = pres.getElementsByTagNameNS("*", "sldSz")[0];
+  const SW = +attr(sz, "cx") || 9144000, SH = +attr(sz, "cy") || 6858000;
+  const relsOf = async path => {
+    const dir = path.replace(/[^/]+$/, ""), file = path.replace(/^.*\//, "");
+    const r = await zip.text(dir + "_rels/" + file + ".rels"), m = {};
+    if (r) xmlDoc(r).querySelectorAll("Relationship").forEach(e => {
+      const t = e.getAttribute("Target");
+      m[e.getAttribute("Id")] = t.startsWith("/") ? t.slice(1) : (dir + t).split("/").reduce((a, s) => (s === ".." ? a.pop() : s !== "." && a.push(s), a), []).join("/");
+    });
+    return m;
+  };
+  const presRels = await relsOf("ppt/presentation.xml");
+  const RNS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+  /* sldId porte « id » (numéro) et « r:id » (relation) : on lit la relation */
+  const ids = Array.from(pres.getElementsByTagNameNS("*", "sldId")).map(e => presRels[e.getAttributeNS(RNS, "id")]).filter(Boolean);
+  const pxW = Math.round(SW / 12700 * 96 / 72), pxH = Math.round(SH / 12700 * 96 / 72);
+  const toPx = v => (+v || 0) / 12700 * 96 / 72;
+  const out = [], urls = [];
+  for (let s = 0; s < ids.length; s++) {
+    if (onSlide) onSlide(s + 1, ids.length);
+    const path = ids[s], x = xmlDoc(await zip.text(path)), rels = await relsOf(path);
+    let html = "";
+    const shapes = Array.from(x.getElementsByTagNameNS("*", "sp")).concat(Array.from(x.getElementsByTagNameNS("*", "pic")));
+    for (const sp of shapes) {
+      const off = sp.getElementsByTagNameNS("*", "off")[0], ext = sp.getElementsByTagNameNS("*", "ext")[0];
+      const ph = sp.getElementsByTagNameNS("*", "ph")[0], phType = attr(ph, "type") || "";
+      let L, T, W, H;
+      if (off && ext && attr(ext, "cx")) { L = toPx(attr(off, "x")); T = toPx(attr(off, "y")); W = toPx(attr(ext, "cx")); H = toPx(attr(ext, "cy")); }
+      else if (/title/i.test(phType)) { L = pxW * 0.05; T = pxH * 0.05; W = pxW * 0.9; H = pxH * 0.17; }
+      else { L = pxW * 0.06; T = pxH * 0.25; W = pxW * 0.88; H = pxH * 0.68; }
+      const box = "position:absolute;left:" + L + "px;top:" + T + "px;width:" + W + "px;height:" + H + "px;";
+      if (sp.localName === "pic") {
+        const blip = sp.getElementsByTagNameNS("*", "blip")[0], target = blip ? rels[blip.getAttributeNS(RNS, "embed")] : null;
+        if (target) { const d = await zip.get(target); if (d) { const u = blobUrl(d, imgType(target)); urls.push(u); html += '<img src="' + u + '" style="' + box + 'object-fit:fill">'; } }
+        continue;
+      }
+      const fill = kids(sp.getElementsByTagNameNS("*", "spPr")[0], "solidFill")[0];
+      const bg = fill ? attr(kids(fill, "srgbClr")[0], "val") : null;
+      const paras = Array.from(sp.getElementsByTagNameNS("*", "p")).filter(p => p.namespaceURI && p.namespaceURI.includes("drawingml"));
+      if (!paras.length && !bg) continue;
+      const title = /title/i.test(phType);
+      const body = paras.map(p => {
+        const pPr = kids(p, "pPr")[0], algn = attr(pPr, "algn");
+        const runs = kids(p).filter(r => r.localName === "r" || r.localName === "br" || r.localName === "fld").map(r => {
+          if (r.localName === "br") return "<br>";
+          const rp = kids(r, "rPr")[0], t = kids(r, "t")[0];
+          const szv = attr(rp, "sz"), col = rp ? attr(rp.getElementsByTagNameNS("*", "srgbClr")[0], "val") : null;
+          const st = (szv ? "font-size:" + (+szv / 100) + "pt;" : "") + (attr(rp, "b") === "1" ? "font-weight:bold;" : "") +
+            (attr(rp, "i") === "1" ? "font-style:italic;" : "") + (col ? "color:#" + col + ";" : "");
+          return '<span style="' + st + '">' + xe(t ? t.textContent : "") + "</span>";
+        }).join("");
+        const bullet = !title && phType !== "ctrTitle" && /body|^$/.test(phType) && ph && runs;
+        return '<p style="margin:0 0 6px;' + (algn === "ctr" ? "text-align:center;" : algn === "r" ? "text-align:right;" : "") + '">' + (bullet ? "• " : "") + (runs || "&nbsp;") + "</p>";
+      }).join("");
+      html += '<div style="' + box + 'overflow:hidden;font:' + (title ? "bold 32pt" : "18pt") + "/1.2 Calibri,Carlito,Arial,sans-serif;" +
+        (bg ? "background:#" + bg + ";" : "") + '">' + body + "</div>";
+    }
+    const [c] = await renderHtmlPages('<div style="position:relative;width:' + pxW + "px;height:" + pxH + 'px;overflow:hidden;background:#fff">' + html + "</div>", "", { raw: true, pxW, pxH });
+    out.push(c);
+  }
+  urls.forEach(u => URL.revokeObjectURL(u));
+  return { canvases: out, w: SW / 12700, h: SH / 12700 };
+}
+
+/* --- point d'entrée : liste de fichiers -> un seul PDF ouvert dans l'éditeur */
+const Conv = {
+  async run(files) {
+    if (!files.length) return;
+    const L = window.PDFLib;
+    const out = await L.PDFDocument.create();
+    const fit = $("#convFit").value;
+    const skipped = [];
+    busy(true, "Conversion…");
+    try {
+      for (let fi = 0; fi < files.length; fi++) {
+        const f = files[fi], name = f.name || "", low = name.toLowerCase();
+        busy(true, "Conversion de « " + name + " » (" + (fi + 1) + "/" + files.length + ")…");
+        await yieldUI();
+        if (/\.(ppt|doc|xls|pps|pot|dot|rtf|pages|key|numbers)$/i.test(low)) { skipped.push(name + " (ancien format)"); continue; }
+        try {
+          if (/^image\//.test(f.type) || /\.(jpe?g|png|gif|webp|bmp|heic|heif|avif)$/i.test(low)) {
+            await Conv.image(out, f, fit);
+          } else if (/\.pdf$/i.test(low) || f.type === "application/pdf") {
+            const src = await L.PDFDocument.load(new Uint8Array(await f.arrayBuffer()), { ignoreEncryption: true });
+            (await out.copyPages(src, src.getPageIndices())).forEach(p => out.addPage(p));
+          } else if (/\.html?$/i.test(low) || f.type === "text/html") {
+            const { css, body } = sanitizeHtml(await f.text());
+            await canvasesToPdf(out, await renderHtmlPages(body, css));
+          } else if (/\.txt$/i.test(low) || f.type === "text/plain") {
+            await canvasesToPdf(out, await renderHtmlPages('<pre style="white-space:pre-wrap;font:10.5pt/1.4 Consolas,monospace">' + xe(await f.text()) + "</pre>"));
+          } else if (/\.docx$/i.test(low)) {
+            await loadScript("vendor/mammoth.browser.min.js");
+            const r = await window.mammoth.convertToHtml({ arrayBuffer: await f.arrayBuffer() });
+            await canvasesToPdf(out, await renderHtmlPages(sanitizeHtml(r.value).body));
+          } else if (/\.odt$/i.test(low)) {
+            const z = await unzip(await f.arrayBuffer());
+            const r = await odtToHtml(z);
+            await canvasesToPdf(out, await renderHtmlPages(r.body));
+            r.urls.forEach(u => URL.revokeObjectURL(u));
+          } else if (/\.pptx$/i.test(low)) {
+            const z = await unzip(await f.arrayBuffer());
+            const r = await pptxToCanvases(z, (i, n) => busy(true, "« " + name + " » : diapositive " + i + " sur " + n + "…"));
+            await canvasesToPdf(out, r.canvases, r.w, r.h);
+          } else { skipped.push(name + " (format inconnu)"); }
+        } catch (e) { console.error(e); skipped.push(name + " (" + e.message + ")"); }
+      }
+      if (!out.getPageCount()) { busy(false); toast("Aucun fichier n'a pu être converti : " + skipped.join(", "), 7000); return; }
+      const first = files[0].name.replace(/\.[^.]+$/, "") || "document";
+      const bytes = await out.save();
+      busy(false);
+      if (curSheet) closeSheet();
+      await openBytes(bytes, (files.length > 1 ? first + " et autres" : first) + ".pdf");
+      if (skipped.length) toast("Non convertis : " + skipped.join(" · ") + ". Pour un ancien format (.doc, .ppt), enregistrez-le d'abord en .docx ou .pptx.", 9000);
+      else toast("Conversion terminée : " + out.getPageCount() + " page" + (out.getPageCount() > 1 ? "s" : "") + ".", 3000);
+    } finally { busy(false); }
+  },
+  async image(doc, f, fit) {
+    const url = URL.createObjectURL(f);
+    try {
+      const im = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error("image illisible par ce navigateur")); i.src = url; });
+      const c = document.createElement("canvas");
+      const k = Math.min(1, 3000 / Math.max(im.naturalWidth, im.naturalHeight));
+      c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+      const cx = c.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0, 0, c.width, c.height); cx.drawImage(im, 0, 0, c.width, c.height);
+      const png = /png$/i.test(f.type) || /\.png$/i.test(f.name);
+      const blob = await new Promise(r => c.toBlob(r, png ? "image/png" : "image/jpeg", 0.92));
+      const data = new Uint8Array(await blob.arrayBuffer());
+      const img = png ? await doc.embedPng(data) : await doc.embedJpg(data);
+      if (fit === "image") {
+        const W = im.naturalWidth * 0.75, H = im.naturalHeight * 0.75;          /* 96 ppp -> points */
+        doc.addPage([W, H]).drawImage(img, { x: 0, y: 0, width: W, height: H });
+      } else {
+        const land = im.naturalWidth > im.naturalHeight;
+        const W = land ? A4.h : A4.w, H = land ? A4.w : A4.h, m = 28;
+        const s = Math.min((W - 2 * m) / im.naturalWidth, (H - 2 * m) / im.naturalHeight);
+        const w = im.naturalWidth * s, h = im.naturalHeight * s;
+        doc.addPage([W, H]).drawImage(img, { x: (W - w) / 2, y: (H - h) / 2, width: w, height: h });
+      }
+      c.width = c.height = 1;
+    } finally { URL.revokeObjectURL(url); }
+  }
+};
+
+/* ==================================================== comparer deux PDF */
+async function pageLines(doc) {
+  const out = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const pg = await doc.getPage(i), vp = pg.getViewport({ scale: 1 }), tc = await pg.getTextContent();
+    const items = [];
+    for (const it of tc.items) {
+      if (!it.str || !it.str.trim()) continue;
+      const [a, b, c, d, e, f] = it.transform;
+      const p0 = vp.convertToViewportPoint(e, f), h = Math.hypot(c, d) || 10;
+      items.push({ s: it.str, x: p0[0], y: p0[1], h, w: it.width || 0 });
+    }
+    items.sort((p, q) => p.y - q.y || p.x - q.x);
+    const lines = [];
+    for (const it of items) {
+      const L0 = lines[lines.length - 1];
+      if (L0 && Math.abs(it.y - L0.y) < Math.max(it.h, L0.h) * 0.5) { L0.items.push(it); L0.h = Math.max(L0.h, it.h); }
+      else lines.push({ y: it.y, h: it.h, items: [it] });
+    }
+    out.push({ w: vp.width, h: vp.height, lines: lines.map(L0 => {
+      L0.items.sort((p, q) => p.x - q.x);
+      const x0 = Math.min(...L0.items.map(t => t.x)), x1 = Math.max(...L0.items.map(t => t.x + t.w));
+      const txt = L0.items.map(t => t.s).join(" ");
+      return { t: txt.replace(/\s+/g, " ").trim(), n: txt.replace(/\s+/g, "").toLowerCase(), x: x0, y: L0.y - L0.h, w: Math.max(4, x1 - x0), h: L0.h * 1.25 };
+    }) });
+    pg.cleanup();
+  }
+  return out;
+}
+/* plus longue sous-suite commune : lignes identiques des deux côtés */
+function lcsDiff(A, B) {
+  const n = A.length, m = B.length, dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+    dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const delA = new Set(), addB = new Set();
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (A[i] === B[j]) { i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) delA.add(i++);
+    else addB.add(j++);
+  }
+  while (i < n) delA.add(i++);
+  while (j < m) addB.add(j++);
+  return { delA, addB };
+}
+const Cmp = {
+  a: null, b: null, rows: [], diffs: [], cur: -1, mode: "text",
+  async start() {
+    if (!S.doc) return;
+    if (curSheet) closeSheet();
+    busy(true, "Préparation de la comparaison…");
+    try {
+      const bytes = await buildVector();
+      Cmp.cleanup();
+      Cmp.a = { name: S.name, pdf: await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise };
+    } finally { busy(false); }
+    $("#cmpTitle").textContent = "Comparer « " + S.name.replace(/\.pdf$/i, "") + " »";
+    $("#cmpSub").textContent = "Choisissez le second PDF à comparer";
+    $("#cmpBody").innerHTML = '<div class="cmp-empty"><p>Choisissez la version à comparer avec le document ouvert.</p>' +
+      '<button class="primary" id="cmpPick2">' + icon("open") + " Choisir le 2e PDF</button></div>";
+    $("#cmpPick2").onclick = () => $("#fileCmp").click();
+    $("#cmpBar").hidden = true;
+    openPanel("pnCmp");
+    $("#pnCmp")._onclose = () => Cmp.cleanup();
+  },
+  cleanup() {
+    for (const k of ["a", "b"]) if (Cmp[k]) { try { Cmp[k].pdf.destroy(); } catch (e) {} Cmp[k] = null; }
+    Cmp.rows = []; Cmp.diffs = []; Cmp.cur = -1;
+  },
+  async load(file) {
+    if (!file) return;
+    busy(true, "Lecture du second document…");
+    try {
+      if (Cmp.b) { try { Cmp.b.pdf.destroy(); } catch (e) {} }
+      Cmp.b = { name: file.name, pdf: await pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false }).promise };
+      busy(true, "Analyse des différences…");
+      const LA = await pageLines(Cmp.a.pdf), LB = await pageLines(Cmp.b.pdf);
+      const n = Math.max(LA.length, LB.length);
+      Cmp.rows = []; Cmp.diffs = [];
+      for (let i = 0; i < n; i++) {
+        const A = LA[i], B = LB[i];
+        const row = { i, A, B, delA: new Set(), addB: new Set() };
+        if (A && B) Object.assign(row, lcsDiff(A.lines.map(l => l.n), B.lines.map(l => l.n)));
+        else if (A) A.lines.forEach((l, k) => row.delA.add(k));
+        else B.lines.forEach((l, k) => row.addB.add(k));
+        /* une différence = un bloc de lignes modifiées consécutives */
+        const marks = [...[...row.delA].map(k => ({ y: A.lines[k].y })), ...[...row.addB].map(k => ({ y: B.lines[k].y }))].sort((p, q) => p.y - q.y);
+        let last = -1e9;
+        for (const m of marks) { if (m.y - last > 30) Cmp.diffs.push({ row: i, y: m.y }); last = m.y; }
+        if ((!A || !B) && !marks.length) Cmp.diffs.push({ row: i, y: 0 });
+        Cmp.rows.push(row);
+      }
+      $("#cmpSub").textContent = "A : " + Cmp.a.name + " · B : " + Cmp.b.name;
+      $("#cmpBar").hidden = false;
+      await Cmp.render();
+    } catch (e) { console.error(e); toast("Comparaison impossible : " + e.message, 6000); }
+    finally { busy(false); }
+  },
+  async render() {
+    const body = $("#cmpBody"); body.innerHTML = "";
+    const colW = Math.floor((body.clientWidth - 30) / 2), dpr = Math.min(window.devicePixelRatio || 1, 2);
+    for (const r of Cmp.rows) {
+      busy(true, "Affichage — page " + (r.i + 1) + " sur " + Cmp.rows.length + "…");
+      const row = document.createElement("div"); row.className = "cmp-row"; row.dataset.row = r.i;
+      row.innerHTML = '<div class="cmp-num">Page ' + (r.i + 1) + "</div>";
+      const cells = [];
+      for (const side of ["A", "B"]) {
+        const cell = document.createElement("div"); cell.className = "cmp-cell";
+        const info = r[side];
+        if (!info) { cell.innerHTML = '<div class="cmp-missing">Page absente de ' + side + "</div>"; row.appendChild(cell); cells.push(null); continue; }
+        const k = colW / info.w;
+        const pg = await Cmp[side.toLowerCase()].pdf.getPage(r.i + 1);
+        const vp = pg.getViewport({ scale: k * dpr });
+        const cv = document.createElement("canvas"); cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+        cv.style.width = colW + "px"; cv.style.height = (info.h * k) + "px";
+        await pg.render({ canvasContext: cv.getContext("2d"), viewport: vp }).promise;
+        cell.style.width = colW + "px"; cell.appendChild(cv);
+        if (Cmp.mode === "text") {
+          const set = side === "A" ? r.delA : r.addB;
+          for (const idx of set) {
+            const l = info.lines[idx], d = document.createElement("div");
+            d.className = "cmp-hl " + (side === "A" ? "del" : "add");
+            d.style.cssText = "left:" + (l.x * k - 2) + "px;top:" + (l.y * k - 1) + "px;width:" + (l.w * k + 4) + "px;height:" + (l.h * k + 2) + "px";
+            cell.appendChild(d);
+          }
+        }
+        row.appendChild(cell); cells.push({ cv, info, k });
+        pg.cleanup();
+      }
+      if (Cmp.mode === "visual" && cells[0] && cells[1]) Cmp.pixelDiff(cells[0].cv, cells[1].cv);
+      body.appendChild(row);
+    }
+    busy(false);
+    Cmp.cur = -1;
+    $("#cmpCount").textContent = Cmp.diffs.length ? Cmp.diffs.length + " différence" + (Cmp.diffs.length > 1 ? "s" : "") : "Aucune différence de texte";
+  },
+  /* différences de pixels : surlignées en rouge sur B */
+  pixelDiff(ca, cb) {
+    const w = Math.min(ca.width, cb.width), h = Math.min(ca.height, cb.height);
+    const a = ca.getContext("2d").getImageData(0, 0, w, h).data, bx = cb.getContext("2d"), bd = bx.getImageData(0, 0, w, h);
+    const b = bd.data; let n = 0;
+    for (let i = 0; i < a.length; i += 4) {
+      const d = Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]);
+      if (d > 90) { b[i] = 230; b[i + 1] = 40; b[i + 2] = 40; n++; }
+      else { b[i] = 255 - (255 - b[i]) * 0.35; b[i + 1] = 255 - (255 - b[i + 1]) * 0.35; b[i + 2] = 255 - (255 - b[i + 2]) * 0.35; }
+    }
+    bx.putImageData(bd, 0, 0);
+    return n;
+  },
+  step(d) {
+    if (!Cmp.diffs.length) return;
+    Cmp.cur = (Cmp.cur + d + Cmp.diffs.length) % Cmp.diffs.length;
+    const df = Cmp.diffs[Cmp.cur], row = $('.cmp-row[data-row="' + df.row + '"]'), body = $("#cmpBody");
+    if (!row) return;
+    const cell = row.querySelector(".cmp-cell canvas"), r = Cmp.rows[df.row], info = r.A || r.B;
+    const k = cell ? parseFloat(cell.style.width) / info.w : 1;
+    body.scrollTo({ top: row.offsetTop + df.y * k - body.clientHeight * 0.3, behavior: "smooth" });
+    $("#cmpCount").textContent = "Différence " + (Cmp.cur + 1) + " sur " + Cmp.diffs.length;
+  }
+};
+
+/* ------------------------------------------------- branchements de la v4 */
+function initV4() {
+  /* filigrane */
+  const wmDraft = () => S.wmDraft || (S.wmDraft = Object.assign({}, WM_DEF, S.wm || {}));
+  const wmSync = () => {
+    const w = wmDraft();
+    $$("#wmType button").forEach(b => b.classList.toggle("on", b.dataset.t === w.type));
+    $$("#shWm .pane").forEach(p => p.classList.toggle("on", p.dataset.pane === w.type));
+    $("#wmText").value = w.text; $("#wmFont").value = w.font; $("#wmBold").checked = w.bold;
+    $("#wmSize").value = w.size; $("#wmFit").checked = w.fit; $("#wmOpacity").value = Math.round(w.opacity * 100);
+    $("#wmPos").value = w.pos; $("#wmPages").value = w.pages; $("#wmScale").value = Math.round(w.scale * 100);
+    $("#wmOpacityV").textContent = Math.round(w.opacity * 100) + " %";
+    $("#wmSizeV").textContent = w.fit && (w.pos === "diag" || w.pos === "center") ? "auto" : w.size + " pt";
+    $$("#wmColors .dot").forEach(d => d.classList.toggle("on", d.dataset.c === w.color));
+    $$("#wmPresets button").forEach(b => b.classList.toggle("on", b.textContent === w.text));
+    if (w.src) $("#wmImgPrev").src = w.src; else $("#wmImgPrev").removeAttribute("src");
+  };
+  const wmLive = () => { const w = wmDraft(); if (w.type === "image" && !w.src) { S.wm = null; } else S.wm = Object.assign({}, w); WM.render(); };
+  WM.open = () => {
+    if (!S.doc) { toast("Ouvrez d'abord un PDF."); return; }
+    setTool("select");
+    S.wmPrev = S.wm ? Object.assign({}, S.wm) : null;
+    S.wmDraft = Object.assign({}, WM_DEF, S.wm || {});
+    wmSync(); wmLive();
+    openSheet("shWm");
+    $("#shWm")._onclose = () => { if (!S.wmKeep) { S.wm = S.wmPrev; WM.render(); } S.wmKeep = false; S.wmDraft = null; };
+  };
+  $("#wmPresets").innerHTML = WM_PRESETS.map(p => "<button>" + esc(p) + "</button>").join("");
+  $$("#wmPresets button").forEach(b => b.onclick = () => { wmDraft().text = b.textContent; wmSync(); wmLive(); });
+  $("#wmColors").innerHTML = ["#c0392b", "#111111", "#1d4ed8", "#7f8c8d", "#0a6b2f"].map(c =>
+    '<button aria-label="Couleur"><span class="dot" data-c="' + c + '" style="background:' + c + '"></span></button>').join("");
+  $$("#wmColors .dot").forEach(d => d.parentNode.onclick = () => { wmDraft().color = d.dataset.c; wmSync(); wmLive(); });
+  $$("#wmType button").forEach(b => b.onclick = () => { wmDraft().type = b.dataset.t; wmSync(); wmLive(); });
+  const bindIn = (id, fn) => $(id).addEventListener("input", e => { fn(e.target); wmSync(); wmLive(); });
+  bindIn("#wmText", t => wmDraft().text = t.value || " ");
+  bindIn("#wmFont", t => wmDraft().font = t.value);
+  bindIn("#wmBold", t => wmDraft().bold = t.checked);
+  bindIn("#wmSize", t => { wmDraft().size = +t.value; wmDraft().fit = false; });
+  bindIn("#wmFit", t => wmDraft().fit = t.checked);
+  bindIn("#wmOpacity", t => wmDraft().opacity = +t.value / 100);
+  bindIn("#wmPos", t => wmDraft().pos = t.value);
+  bindIn("#wmPages", t => wmDraft().pages = t.value);
+  bindIn("#wmScale", t => wmDraft().scale = +t.value / 100);
+  ["#wmFont", "#wmPos", "#wmPages", "#wmBold", "#wmFit"].forEach(id => $(id).addEventListener("change", () => { $(id).dispatchEvent(new Event("input")); }));
+  $("#wmPick").onclick = () => $("#fileWm").click();
+  $("#fileWm").onchange = e => {
+    const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+    const rd = new FileReader();
+    rd.onload = async () => {
+      const src = await downscale(rd.result, 1600);
+      const im = new Image(); im.onload = () => { const w = wmDraft(); w.src = src; w.ratio = im.height / im.width; w.type = "image"; wmSync(); wmLive(); };
+      im.src = src;
+    };
+    rd.readAsDataURL(f);
+  };
+  $("#wmApply").onclick = () => {
+    const w = wmDraft();
+    if (w.type === "image" && !w.src) { toast("Choisissez d'abord une image."); return; }
+    S.wm = Object.assign({}, w); S.wmKeep = true; closeSheet(); WM.render();
+    toast("Filigrane appliqué : il sera intégré à l'enregistrement, au partage et à l'impression.", 3500);
+  };
+  $("#wmRemove").onclick = () => { S.wm = null; S.wmKeep = true; closeSheet(); WM.render(); toast("Filigrane retiré."); };
+
+  /* censure */
+  $("#searchRedact").onclick = () => {
+    if (!Search.hits.length) { toast("Lancez d'abord une recherche."); return; }
+    snapshot();
+    let n = 0;
+    for (const h of Search.hits) for (const r of h.rects) {
+      S.items.push({ id: uid(), type: "redact", page: h.page, x: r.x - 1, y: r.y - 1, w: r.w + 2, h: r.h + 2, color: "#000000" }); n++;
+    }
+    renderItems(); updateUndo();
+    toast(n + " zone" + (n > 1 ? "s" : "") + " censurée" + (n > 1 ? "s" : "") + ". La suppression devient définitive à l'enregistrement.", 4500);
+  };
+
+  /* chiffrement : afficher les champs */
+  $("#encOn").onchange = e => { $("#encBox").hidden = !e.target.checked; if (e.target.checked) $("#encPwd").focus(); };
+
+  /* conversion vers PDF */
+  $("#convPick").onclick = () => $("#fileConv").click();
+  $("#fileConv").onchange = e => { const f = Array.from(e.target.files); e.target.value = ""; Conv.run(f); };
+  $("#btnConvHome").onclick = () => openSheet("shConv");
+
+  /* comparaison */
+  $("#fileCmp").onchange = e => { const f = e.target.files[0]; e.target.value = ""; Cmp.load(f); };
+  $("#cmpPick").onclick = () => $("#fileCmp").click();
+  $("#cmpPrev").onclick = () => Cmp.step(-1);
+  $("#cmpNext").onclick = () => Cmp.step(1);
+  $$("#cmpMode button").forEach(b => b.onclick = () => {
+    Cmp.mode = b.dataset.m; $$("#cmpMode button").forEach(x => x.classList.toggle("on", x === b));
+    if (Cmp.rows.length) Cmp.render();
+  });
 }
 
 /* ------------------------------------------------- branchements de la v3.1 */
@@ -3314,6 +4402,7 @@ function initV31() {
 function init() {
   $("#appVer").textContent = "version " + APP_VERSION;
   initV31();
+  initV4();
   Prof.init();
   initSigSheet();
   initPinch();
@@ -3347,7 +4436,8 @@ function init() {
     date() { setPending({ kind: "text", text: dateStr(new Date()) }, "Touchez l'endroit où placer la date"); },
     image() { if (!S.doc) { toast("Ouvrez d'abord un PDF."); return; } $("#fileImg").click(); },
     snips() { setTool("select"); openSheet("shSnips"); },
-    stamp() { Stamps.open(); }
+    stamp() { Stamps.open(); },
+    wm() { WM.open(); }
   };
   $$(".tool[data-act]").forEach(b => b.onclick = () => acts[b.dataset.act]());
   $("#hintDone").onclick = () => setTool("select");
@@ -3416,6 +4506,19 @@ function init() {
     },
     search() { closeSheet(); Search.open(); },
     print() { printDoc(); },
+    convert() { openSheet("shConv"); },
+    compare() { closeSheet(); Cmp.start(); },
+    wm() { WM.open(); },
+    redact() { closeSheet(); setTool("redact"); },
+    encrypt() {
+      closeSheet(); setTool("select"); select(null);
+      setTimeout(() => {
+        $$("#saveFmt button").forEach(x => x.classList.toggle("on", x.dataset.f === "pdf"));
+        $("#encOn").checked = true;
+        openSave("save");
+        $("#encBox").hidden = false;
+      }, 320);
+    },
     don() { closeSheet(); faireUnDon(); },
     time() { closeSheet(); setPending({ kind: "text", text: heureStr(new Date()) }, "Touchez l'endroit où placer l'heure"); },
     datetime() {
@@ -3476,7 +4579,7 @@ function init() {
       try {
         const r = await makeExport(fmt, base, {
           imgType: $$('input[name=imgType]').find(x => x.checked).value, dpi: +$("#imgDpi").value,
-          withImages: $("#txtImages").checked });
+          withImages: $("#txtImages").checked, pptMode: $$('input[name=pptMode]').find(x => x.checked).value });
         S.out = { files: r.files, name: r.files.length > 1 ? base + " - images.zip" : r.files[0].name };
         $("#doneName").textContent = r.files.length > 1 ? r.files.length + " images · " + base : r.files[0].name;
         $("#doneInfo").textContent = "Prêt · " + r.info;
@@ -3492,18 +4595,28 @@ function init() {
       return;
     }
     const nm = base + ".pdf";
+    const enc = $("#encOn").checked ? $("#encPwd").value : "";
+    if ($("#encOn").checked) {
+      if (enc.length < 4) { toast("Choisissez un mot de passe d'au moins 4 caractères."); $("#encPwd").focus(); return; }
+      if (enc !== $("#encPwd2").value) { toast("Les deux mots de passe ne correspondent pas."); $("#encPwd2").focus(); return; }
+    }
     const cible = Math.max(0.2, parseFloat(String($("#saveTarget").value).replace(",", ".")) || 5) * Mo;
     const gris = $("#saveGray").checked;
     document.activeElement && document.activeElement.blur && document.activeElement.blur();
     try {
       const r = await makePdf(mode, cible, gris);
+      if (enc) {
+        busy(true, "Chiffrement AES-256…");
+        try { r.bytes = await encryptPdf(r.bytes, enc); } finally { busy(false); }
+        r.note = (r.note ? r.note + " · " : "") + "protégé par mot de passe (AES-256)";
+      }
       S.out = { bytes: r.bytes, name: nm, files: [{ name: nm, blob: new Blob([r.bytes], { type: "application/pdf" }), type: "application/pdf" }] };
       $("#doneName").textContent = nm;
       $("#doneInfo").textContent = "PDF prêt · " + fmtMo(r.bytes.length) + (r.note ? " · " + r.note : "");
       $("#saveForm").hidden = true; $("#saveDone").hidden = false;
       $("#doneOpen").hidden = true;
       setDoneMode(S.intent);
-      Recents.add(r.bytes, nm);
+      if (!enc) Recents.add(r.bytes, nm);
       $("#shSave").scrollTop = 0;
     } catch (e) {
       console.error(e);

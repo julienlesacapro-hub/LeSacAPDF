@@ -503,3 +503,43 @@ body:not(.has-doc) #btnSearch, body:not(.has-doc) #btnPrint, body:not(.has-doc) 
 .sheet select { border: 1px solid var(--line); border-radius: 10px; height: 40px; padding: 0 10px; background: var(--surface-2);
   color: var(--ink); font: inherit; font-size: 15px; }
 #imgOpts .sub, #txtOpts .sub { margin: 6px 0 0; font-size: 12.5px; }
+
+/* =====================================================================
+   Version 4.0 : filigrane, censure, chiffrement, formats, conversion,
+   comparaison.
+   ===================================================================== */
+.seg.fmt { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; }
+.seg.fmt button { height: 36px; font-size: 12.5px; white-space: nowrap; }
+.wmk { position: absolute; pointer-events: none; white-space: nowrap; z-index: 1; line-height: 1; user-select: none; }
+.wmk img { display: block; }
+.item.redact { background: #000; }
+.item.redact.sel { outline-color: #E5484D; }
+.wmpresets { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 2px; }
+.wmpresets button { border: 1px solid var(--line); border-radius: 16px; padding: 6px 11px; font-size: 13px; background: var(--surface); }
+.wmpresets button.on { border-color: var(--sel); background: var(--sel-soft); color: var(--sel); font-weight: 600; }
+#wmImgPrev { display: block; max-width: 100%; max-height: 120px; margin: 10px auto 0; border-radius: 8px;
+  background: repeating-conic-gradient(#EFEFEF 0 25%, #fff 0 50%) 50% / 14px 14px; }
+#wmImgPrev:not([src]) { display: none; }
+.sheet input[type=password] { width: 100%; border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px;
+  background: var(--surface-2); color: var(--ink); font: inherit; font-size: 16px; }
+#encBox { padding-left: 4px; }
+/* comparaison */
+.cmpbar { display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.cmpbar .seg { margin: 0; width: 170px; flex: none; }
+.cmpbar .seg button { height: 32px; font-size: 13px; }
+#cmpCount { flex: 1; font-size: 13px; color: var(--muted); text-align: center; }
+.cmplegend { display: flex; justify-content: center; gap: 14px; padding: 6px; font-size: 12px; color: var(--muted); }
+.cmplegend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.cmplegend .del::before { background: rgba(229, 72, 77, .55); }
+.cmplegend .add::before { background: rgba(30, 142, 85, .55); }
+.cmpbody { flex: 1; overflow: auto; padding: 6px 10px 30px; overscroll-behavior: contain; }
+.cmp-row { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-bottom: 16px; }
+.cmp-num { width: 100%; font-size: 12px; color: var(--muted); text-align: center; }
+.cmp-cell { position: relative; background: #fff; box-shadow: var(--shadow-1); }
+.cmp-cell canvas { display: block; }
+.cmp-hl { position: absolute; border-radius: 2px; mix-blend-mode: multiply; pointer-events: none; }
+.cmp-hl.del { background: rgba(229, 72, 77, .38); }
+.cmp-hl.add { background: rgba(30, 142, 85, .35); }
+.cmp-missing { min-height: 120px; display: grid; place-items: center; color: var(--muted); font-size: 13px; padding: 20px; background: var(--surface-2); }
+.cmp-empty { height: 100%; display: grid; place-content: center; justify-items: center; gap: 14px; text-align: center; color: var(--muted); padding: 20px; }
+.cmp-empty .primary { padding: 0 22px; }
