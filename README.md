@@ -53,6 +53,7 @@ Une seule fois : *Settings → Pages → Build and deployment → Source : **Git
 | **4.1** — Anciens formats Office | Word .doc et PowerPoint .ppt (97-2003) → PDF : texte et structure repris (paragraphes, tableaux, une page par diapositive avec titre et puces), sans les images ni la mise en forme d'origine |
 | **4.0** — Censure définitive | rectangles noirs ou « censurer tous les résultats » d'une recherche ; les pages concernées sont rastérisées à l'enregistrement : le contenu caché est supprimé |
 | **4.0** — Comparer | deux PDF côte à côte, lignes modifiées surlignées (A rouge / B vert), navigation de différence en différence, mode visuel (pixels) |
+| **4.3** — Diaporama | lecture plein écran, une page à la fois : toucher à droite / à gauche, balayage, flèches ou espace ; commandes au centre ; écran maintenu allumé ; s'adapte à la rotation ; annotations et filigrane affichés |
 | Confort mobile | pincer pour zoomer, annuler/rétablir, aperçu des pages, mode sombre, hors connexion |
 
 Bon à savoir : sur iPhone, les signatures et textes enregistrés de l'application installée sont
@@ -65,6 +66,7 @@ npm run serve                                         # http://localhost:8080
 node tools/e2e-test.js fichier.pdf captures/ android   # test complet sur téléphone émulé (ou: iphone)
 node tools/e2e-v31.js a.pdf b.pdf photo.jpg captures/ android   # test des fonctions 3.1
 node tools/e2e-export.js a.pdf captures/                        # test des exports image / Word / ODT / texte
+node tools/e2e-show.js a.pdf captures/ android                  # test du diaporama
 node tools/e2e-v4.js a.pdf b.pdf photo.jpg image.png page.html doc.docx doc.odt captures/ android   # test 4.0
 npm run icons                                         # régénère les icônes depuis design/sac-source.jpg
 ```

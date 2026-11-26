@@ -7,7 +7,7 @@
 (function () {
 "use strict";
 
-const APP_VERSION = "4.2.0";
+const APP_VERSION = "4.3.0";
 
 /* Lien de la page de don de l'association PROMEDNAV.
    À RENSEIGNER : tant qu'il est vide, le bouton « Faire un don » affiche
@@ -980,7 +980,7 @@ function setPending(pd, msg) {
 function showProps() {
   const bar = $("#ctxBar");
   const it = getSel();
-  if (!it || S.tool !== "select" || S.pending) { bar.hidden = true; bar.innerHTML = ""; return; }
+  if (!it || S.tool !== "select" || S.pending) { bar.hidden = true; bar.innerHTML = ""; document.body.classList.remove("has-sel"); return; }
   const b = (act, html, cls, label) => '<button class="cb ' + (cls || "") + '" data-a="' + act + '"' +
     (label ? ' aria-label="' + label + '"' : "") + ">" + html + "</button>";
   const sep = '<span class="sep"></span>';
@@ -1008,6 +1008,7 @@ function showProps() {
   h += b("dup", icon("copy"), "", "Dupliquer") + b("del", icon("trash"), "danger", "Supprimer");
   bar.innerHTML = h;
   bar.hidden = false;
+  document.body.classList.add("has-sel");   /* la barre recouvre ▶ et le compteur de pages : on les masque */
 }
 
 function ctxAction(a, el) {
@@ -4773,6 +4774,142 @@ async function sheetsToPdf(doc, sheets, onSheet) {
   if (!any) throw new Error("classeur vide");
 }
 
+/* =====================================================================
+   VERSION 4.3 — lecture en diaporama : une page à la fois, plein écran.
+   Toucher / cliquer : à droite page suivante, à gauche page précédente.
+   Balayage horizontal, flèches, espace, Page suivante/précédente, Échap.
+   Le document est présenté tel qu'il sera enregistré (annotations,
+   filigrane, censure comprise).
+   ===================================================================== */
+const Show = {
+  pdf: null, i: 0, n: 0, cache: new Map(), token: 0, hideT: null,
+  async start(from) {
+    if (!S.doc) return;
+    if (curSheet) closeSheet();
+    busy(true, "Préparation du diaporama…");
+    try {
+      const bytes = await buildVector();
+      Show.pdf = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+    } catch (e) { busy(false); toast("Diaporama impossible : " + e.message, 5000); return; }
+    busy(false);
+    Show.n = Show.pdf.numPages; Show.i = clamp(from || 0, 0, Show.n - 1); Show.cache.clear();
+    openPanel("pnShow");
+    document.body.classList.add("showing");          /* pas de messages de l'éditeur par-dessus la présentation */
+    $("#toast").classList.remove("on");
+    $("#pnShow")._onclose = () => Show.stop();
+    const el = document.documentElement;
+    try { if (el.requestFullscreen && !document.fullscreenElement) await el.requestFullscreen({ navigationUI: "hide" }); } catch (e) {}
+    try { if (navigator.wakeLock) Show.lock = await navigator.wakeLock.request("screen"); } catch (e) {}   /* écran toujours allumé */
+    Show.show();
+    Show.chrome(true);
+  },
+  stop() {
+    Show.token++;
+    document.body.classList.remove("showing");
+    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    if (Show.lock) { try { Show.lock.release(); } catch (e) {} Show.lock = null; }
+    Show.cache.forEach(c => { c.width = c.height = 1; }); Show.cache.clear();
+    if (Show.pdf) { try { Show.pdf.destroy(); } catch (e) {} Show.pdf = null; }
+    $("#showStage").innerHTML = "";
+    /* on revient dans l'éditeur sur la page regardée, une fois le plein écran
+       quitté (le changement de taille annulerait un défilement immédiat) */
+    const target = Show.i;
+    const back = () => { const pg = S.pages[target]; if (pg && pg.el) { $("#viewer").scrollTop = pg.el.offsetTop - 10; updatePill(); } };
+    setTimeout(back, 120); setTimeout(back, 500);
+  },
+  /* rendu d'une page à la taille de l'écran (mis en cache : précédente, courante, suivante) */
+  async render(i) {
+    const key = i + ":" + window.innerWidth + "x" + window.innerHeight;
+    if (Show.cache.has(key)) return Show.cache.get(key);
+    const pg = await Show.pdf.getPage(i + 1), base = pg.getViewport({ scale: 1 });
+    const W = window.innerWidth, H = window.innerHeight, fit = Math.min(W / base.width, H / base.height);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    let k = fit * dpr;
+    if (base.width * base.height * k * k > MAX_PX * 1.5) k = Math.sqrt(MAX_PX * 1.5 / (base.width * base.height));
+    const vp = pg.getViewport({ scale: k }), c = document.createElement("canvas");
+    c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+    c.style.width = Math.round(base.width * fit) + "px"; c.style.height = Math.round(base.height * fit) + "px";
+    await pg.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
+    pg.cleanup();
+    Show.cache.set(key, c);
+    /* mémoire : on ne garde que les pages voisines */
+    for (const k2 of [...Show.cache.keys()]) {
+      const j = +k2.split(":")[0];
+      if (Math.abs(j - Show.i) > 1 || !k2.endsWith(":" + window.innerWidth + "x" + window.innerHeight)) {
+        const old = Show.cache.get(k2); old.width = old.height = 1; Show.cache.delete(k2);
+      }
+    }
+    return c;
+  },
+  async show(dir) {
+    const tok = ++Show.token, i = Show.i;
+    $("#showNum").textContent = (i + 1) + " / " + Show.n;
+    $("#showBar").style.width = ((i + 1) / Show.n * 100) + "%";
+    const c = await Show.render(i);
+    if (tok !== Show.token) return;
+    const st = $("#showStage");
+    st.innerHTML = ""; st.appendChild(c);
+    c.classList.remove("in-next", "in-prev");
+    if (dir) { void c.offsetWidth; c.classList.add(dir > 0 ? "in-next" : "in-prev"); }
+    /* préchargement des voisines */
+    if (i + 1 < Show.n) Show.render(i + 1).catch(() => {});
+    if (i > 0) Show.render(i - 1).catch(() => {});
+  },
+  go(d) {
+    const j = Show.i + d;
+    if (j < 0) { Show.flash("Première page"); return; }
+    if (j >= Show.n) { Show.flash("Fin du document — touchez ✕ pour quitter"); return; }
+    Show.i = j; Show.show(d);
+  },
+  flash(msg) { const f = $("#showMsg"); f.textContent = msg; f.classList.add("on"); clearTimeout(Show.msgT); Show.msgT = setTimeout(() => f.classList.remove("on"), 1600); },
+  /* boutons et numéro visibles quelques secondes, puis masqués */
+  chrome(on) {
+    $("#pnShow").classList.toggle("chrome", on);
+    clearTimeout(Show.hideT);
+    if (on) Show.hideT = setTimeout(() => $("#pnShow").classList.remove("chrome"), 2800);
+  }
+};
+function initShow() {
+  const st = $("#showStage"), pn = $("#pnShow");
+  let x0 = null, y0 = 0, t0 = 0, swiped = false;
+  st.addEventListener("pointerdown", e => { x0 = e.clientX; y0 = e.clientY; t0 = Date.now(); swiped = false; });
+  st.addEventListener("pointerup", e => {
+    if (x0 === null) return;
+    const dx = e.clientX - x0, dy = e.clientY - y0;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5 && Date.now() - t0 < 800) { swiped = true; Show.go(dx < 0 ? 1 : -1); Show.chrome(false); }
+    x0 = null;
+  });
+  /* clic : tiers gauche = précédente, tiers central = afficher les commandes, tiers droit = suivante */
+  st.addEventListener("click", e => {
+    if (swiped) return;
+    const w = window.innerWidth;
+    if (e.clientX < w / 3) Show.go(-1);
+    else if (e.clientX > w * 2 / 3) Show.go(1);
+    else { Show.chrome(!pn.classList.contains("chrome")); return; }
+    Show.chrome(false);
+  });
+  $("#showPrev").onclick = e => { e.stopPropagation(); Show.go(-1); Show.chrome(true); };
+  $("#showNext").onclick = e => { e.stopPropagation(); Show.go(1); Show.chrome(true); };
+  $("#showClose").onclick = e => { e.stopPropagation(); closePanel(); };
+  document.addEventListener("keydown", e => {
+    if (!pn.classList.contains("on")) return;
+    const k = e.key;
+    if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter", "n"].includes(k)) { e.preventDefault(); e.stopImmediatePropagation(); Show.go(1); }
+    else if (["ArrowLeft", "ArrowUp", "PageUp", "Backspace", "p"].includes(k)) { e.preventDefault(); e.stopImmediatePropagation(); Show.go(-1); }
+    else if (k === "Home") { e.preventDefault(); Show.i = 0; Show.show(-1); }
+    else if (k === "End") { e.preventDefault(); Show.i = Show.n - 1; Show.show(1); }
+    else if (k === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closePanel(); }
+  }, true);
+  /* rotation de l'écran ou sortie du plein écran : on redessine à la bonne taille */
+  let rt = null;
+  window.addEventListener("resize", () => { if (!pn.classList.contains("on")) return; clearTimeout(rt); rt = setTimeout(() => Show.show(), 150); });
+  document.addEventListener("fullscreenchange", () => {
+    if (!document.fullscreenElement && pn.classList.contains("on") && Show.wasFull) closePanel();
+    Show.wasFull = !!document.fullscreenElement;
+  });
+  $("#btnShow").onclick = () => Show.start(S.cur);
+}
+
 /* ------------------------------------------------- branchements de la v4 */
 function initV4() {
   /* filigrane */
@@ -4968,6 +5105,7 @@ function init() {
   $("#appVer").textContent = "version " + APP_VERSION;
   initV31();
   initV4();
+  initShow();
   Prof.init();
   initSigSheet();
   initPinch();
@@ -5046,6 +5184,7 @@ function init() {
   const menu = {
     open() { closeSheet(); pick(); },
     pages() { buildThumbs(); openSheet("shPages"); },
+    show() { closeSheet(); setTimeout(() => Show.start(0), 50); },
     rotate() {
       closeSheet();
       const p = S.pages[S.cur]; if (!p) return;
