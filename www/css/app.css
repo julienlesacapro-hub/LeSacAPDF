@@ -543,3 +543,36 @@ body:not(.has-doc) #btnSearch, body:not(.has-doc) #btnPrint, body:not(.has-doc) 
 .cmp-missing { min-height: 120px; display: grid; place-items: center; color: var(--muted); font-size: 13px; padding: 20px; background: var(--surface-2); }
 .cmp-empty { height: 100%; display: grid; place-content: center; justify-items: center; gap: 14px; text-align: center; color: var(--muted); padding: 20px; }
 .cmp-empty .primary { padding: 0 22px; }
+
+/* ------------------------------------------------------- diaporama (4.3) */
+body:not(.has-doc) .showbtn { display: none; }
+.showbtn { position: absolute; right: calc(var(--sar) + 104px); bottom: calc(var(--tbh) + var(--sab) + 12px); z-index: 24;
+  width: 34px; height: 34px; border-radius: 17px; display: grid; place-items: center; color: #fff;
+  background: rgba(23, 32, 44, .82); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.showbtn svg { width: 19px; height: 19px; }
+#pnShow { background: #000; color: #fff; touch-action: none; }
+.showstage { position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; cursor: pointer;
+  -webkit-user-select: none; user-select: none; }
+.showstage canvas { display: block; background: #fff; box-shadow: 0 0 40px rgba(0, 0, 0, .6); }
+.showstage canvas.in-next { animation: shin .22s ease-out; }
+.showstage canvas.in-prev { animation: shinp .22s ease-out; }
+@keyframes shin { from { opacity: .3; transform: translateX(28px); } to { opacity: 1; transform: none; } }
+@keyframes shinp { from { opacity: .3; transform: translateX(-28px); } to { opacity: 1; transform: none; } }
+.showtop { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between;
+  padding: calc(var(--sat) + 10px) calc(var(--sar) + 10px) 10px calc(var(--sal) + 16px);
+  background: linear-gradient(rgba(0, 0, 0, .55), transparent); font-weight: 600; font-variant-numeric: tabular-nums;
+  opacity: 0; transition: opacity .25s; pointer-events: none; }
+.showtop .ib { color: #fff; background: rgba(255, 255, 255, .14); border-radius: 20px; }
+.shownav { position: absolute; top: 50%; margin-top: -26px; width: 52px; height: 52px; border-radius: 26px; display: grid; place-items: center;
+  color: #fff; background: rgba(255, 255, 255, .16); opacity: 0; transition: opacity .25s; pointer-events: none; }
+.shownav.prev { left: calc(var(--sal) + 10px); }
+.shownav.next { right: calc(var(--sar) + 10px); }
+.shownav svg { width: 28px; height: 28px; }
+#pnShow.chrome .showtop, #pnShow.chrome .shownav { opacity: 1; pointer-events: auto; }
+.showmsg { position: absolute; left: 50%; bottom: calc(var(--sab) + 40px); transform: translateX(-50%); background: rgba(255, 255, 255, .92);
+  color: #111; padding: 8px 16px; border-radius: 18px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap; }
+.showmsg.on { opacity: 1; }
+.showbar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255, 255, 255, .12); }
+.showbar i { display: block; height: 100%; width: 0; background: #E2AC72; transition: width .25s; }
+body.has-sel .showbtn, body.has-sel .pagepill { display: none; }
+body.showing .toast { visibility: hidden; }
