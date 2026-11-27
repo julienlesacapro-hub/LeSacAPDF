@@ -148,7 +148,8 @@ const pages = f => +/Pages:\s+(\d+)/.exec(execFileSync("pdfinfo", [f]).toString(
   await p.locator('#scFx [data-fx=bw]').tap(); await p.waitForTimeout(600);
   await shot(p, "11-scan-nb");
   await p.locator("#scDone").tap();
-  await p.waitForFunction(() => /^Scan/.test(document.querySelector("#docTitle").textContent), null, { timeout: 20000 });
+  /* OCR activé par défaut : la reconnaissance du texte prend quelques secondes */
+  await p.waitForFunction(() => /^Scan/.test(document.querySelector("#docTitle").textContent), null, { timeout: 180000 });
   ok(await p.locator(".page").count() === 1, "scanner : PDF d'une page créé et ouvert");
   await p.waitForTimeout(500);
   await shot(p, "12-scan-pdf");

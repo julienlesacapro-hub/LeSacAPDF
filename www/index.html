@@ -68,6 +68,7 @@
     <symbol id="i-convert" viewBox="0 0 24 24"><path d="M4 7h12l-3-3M20 17H8l3 3"/></symbol>
     <symbol id="i-play" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M10 8v5l4-2.5z" fill="currentColor"/><path d="M8 21h8M12 17v4"/></symbol>
     <symbol id="i-print" viewBox="0 0 24 24"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/></symbol>
+    <symbol id="i-ocr" viewBox="0 0 24 24"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M8 9h8M12 9v7"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
     <symbol id="i-stamp" viewBox="0 0 24 24"><path d="M9.5 3.5h5l-1 7h4a2 2 0 0 1 2 2v3H4.5v-3a2 2 0 0 1 2-2h4z"/><path d="M5 19.5h14"/></symbol>
     <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8a2 2 0 0 1 2-2h2l1.5-2h5L16 6h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.5"/></symbol>
@@ -208,6 +209,7 @@
     <button data-m="wm" class="needdoc"><svg><use href="#i-wm"/></svg>Filigrane</button>
     <button data-m="redact" class="needdoc"><svg><use href="#i-redact"/></svg>Censurer définitivement</button>
     <button data-m="encrypt" class="needdoc"><svg><use href="#i-key"/></svg>Protéger par mot de passe</button>
+    <button data-m="ocr" class="needdoc"><svg><use href="#i-ocr"/></svg>Reconnaître le texte (OCR) <small>rendre un scan sélectionnable et cherchable</small></button>
     <button data-m="search" class="needdoc"><svg><use href="#i-search"/></svg>Rechercher dans le document</button>
     <button data-m="print" class="needdoc"><svg><use href="#i-print"/></svg>Imprimer</button>
     <hr>
@@ -546,8 +548,10 @@
     Excel (.xlsx et ancien .xls), pages web (.html), texte (.txt) ou PDF. Plusieurs fichiers sont réunis dans un seul PDF, dans l'ordre choisi.</p>
   <label class="field-l">Taille des pages pour les images
     <select id="convFit"><option value="a4">A4, image ajustée (marges)</option><option value="image">Taille de l'image</option></select></label>
-  <p class="sub">Les documents Word, ODT, PowerPoint et HTML sont mis en page puis enregistrés en images : le texte n'est pas
-    sélectionnable et la mise en page peut différer légèrement de l'original. Pour les anciens formats .doc et .ppt (Office 97-2003),
+  <label class="chk"><input type="checkbox" id="convOcr" checked> Reconnaître le texte des images (OCR)</label>
+  <p class="sub">Les documents Word, ODT, PowerPoint, Excel et HTML sont mis en page puis enregistrés en images, avec leur texte
+    sélectionnable et cherchable ; la mise en page peut différer légèrement de l'original. Le texte des images est reconnu
+    sur le téléphone (aucun envoi) ; la première fois, le module de reconnaissance (environ 4,6 Mo) est téléchargé. Pour les anciens formats .doc et .ppt (Office 97-2003),
     seuls le texte et sa structure sont repris (paragraphes, tableaux, diapositives), sans les images ni la mise en forme.
     Pour Excel, chaque feuille visible devient un tableau avec les valeurs affichées (dates, montants, pourcentages, formules calculées),
     sans les couleurs ni les bordures d'origine.</p>
@@ -631,6 +635,7 @@
     <label class="rng full">Contraste <input type="range" id="scContrast" min="-50" max="80" value="30"></label>
     <label class="rng full">Luminosité <input type="range" id="scBright" min="-60" max="60" value="5"></label>
     <div class="scstrip" id="scStrip"></div>
+    <label class="chk dark"><input type="checkbox" id="scOcr" checked> Reconnaître le texte (OCR) : sélectionnable et cherchable</label>
     <div class="row" style="margin-top:6px">
       <button class="ghost" id="scRecrop">Recadrer</button>
       <button class="ghost" id="scMore"><svg><use href="#i-camera"/></svg>Page suivante</button>

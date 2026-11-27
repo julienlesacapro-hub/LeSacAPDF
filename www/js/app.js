@@ -7,7 +7,7 @@
 (function () {
 "use strict";
 
-const APP_VERSION = "4.4.0";
+const APP_VERSION = "4.5.0";
 
 /* Lien de la page de don de l'association PROMEDNAV.
    À RENSEIGNER : tant qu'il est vide, le bouton « Faire un don » affiche
@@ -2702,6 +2702,7 @@ const Scan = {
       $("#pnScan")._onclose = () => { Scan.pages = []; Scan.cur = -1; };
     }
     Scan.cur = first;
+    $("#scOcr").checked = PREF.scanOcr !== false;
     Scan.showCrop();
   },
 
@@ -2819,25 +2820,40 @@ const Scan = {
   },
 
   async finish() {
+    /* confirmation demandée tant que le scanner est ouvert (sinon sa fermeture la ferait disparaître) */
+    if (S.items.length && !(await ask("Ouvrir le scan ?",
+        "Les annotations non enregistrées du document actuel seront perdues.", null))) return;
     busy(true, "Création du PDF…");
     try {
       for (const p of Scan.pages) if (!p.out) await Scan.process(p);
       const L = window.PDFLib, doc = await L.PDFDocument.create();
-      for (const p of Scan.pages) {
+      const ocr = $("#scOcr").checked;
+      PREF.scanOcr = ocr; Prof.savePref();
+      let words = 0;
+      for (let i = 0; i < Scan.pages.length; i++) {
+        const p = Scan.pages[i];
         const blob = await new Promise(r => p.out.toBlob(r, "image/jpeg", 0.82));
         const img = await doc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
-        const W = 595.28, H = W * p.out.height / p.out.width;
-        doc.addPage([W, H]).drawImage(img, { x: 0, y: 0, width: W, height: H });
+        const W = 595.28, H = W * p.out.height / p.out.width, page = doc.addPage([W, H]);
+        page.drawImage(img, { x: 0, y: 0, width: W, height: H });
+        if (ocr) {
+          OCR.progress("Reconnaissance du texte — page " + (i + 1) + " sur " + Scan.pages.length);
+          const lines = await ocrImage(p.out), cw = p.out.width, ch = p.out.height;
+          words += await Ink.add(doc, page, lines, (x, y) => [x * W / cw, H - y * H / ch]);
+        }
       }
+      if (ocr) { await OCR.done(); OCR.onLog = null; }
       doc.setTitle("Scan"); doc.setCreator("LeSacAPDF");
       const bytes = await doc.save();
       const d = new Date();
       const name = "Scan " + fmtDate(d).replace(/\//g, "-") + " " + fmtTime(d) + ".pdf";
       busy(false);
       closePanel();
-      await openBytes(bytes, name);
+      if (!(await openBytes(bytes, name, { force: true }))) return;
+      if (ocr) toast(words ? "Texte reconnu : " + words + " mots, sélectionnables et cherchables." :
+        "Aucun texte reconnu sur ce scan.", 4000);
     } catch (e) {
-      console.error(e); busy(false); toast("Échec : " + e.message, 5000);
+      console.error(e); OCR.done(); OCR.onLog = null; busy(false); toast("Échec : " + e.message, 5000);
     }
   }
 };
@@ -3993,7 +4009,8 @@ async function renderHtmlPages(bodyHtml, css, opts) {
     const scale = Math.min(2, Math.sqrt((isIOS ? 9e6 : 16e6) / (pxW * fullH)) || 1);
     const canvas = await window.html2canvas(d.documentElement, { scale: Math.max(0.5, scale), backgroundColor: "#ffffff",
       width: pxW, height: fullH, windowWidth: pxW, windowHeight: fullH, logging: false, useCORS: true });
-    if (opts.raw) return [canvas];
+    const words = domWords(d);                                   /* texte sélectionnable */
+    if (opts.raw) { canvas.lines = groupLines(words.map(w => scaleWord(w, canvas.width / pxW, 0))); return [canvas]; }
     /* découpage en pages : on coupe de préférence sur une ligne blanche */
     const k = canvas.width / pxW, pageH = Math.round(pxH * k), out = [];
     const cx = canvas.getContext("2d");
@@ -4009,6 +4026,7 @@ async function renderHtmlPages(bodyHtml, css, opts) {
         }
       }
       const pc = document.createElement("canvas"); pc.width = canvas.width; pc.height = pageH;
+      pc.lines = groupLines(words.filter(w => { const c = (w.y0 + w.y1) / 2 * k; return c >= y && c < cut; }).map(w => scaleWord(w, k, y)));
       const pcx = pc.getContext("2d"); pcx.fillStyle = "#fff"; pcx.fillRect(0, 0, pc.width, pc.height);
       pcx.drawImage(canvas, 0, y, canvas.width, cut - y, 0, 0, canvas.width, cut - y);
       out.push(pc);
@@ -4021,10 +4039,236 @@ async function canvasesToPdf(doc, canvases, w, h) {
   for (const c of canvases) {
     const blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.9));
     const img = await doc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
-    const W = w || A4.w, H = h || A4.h;
-    doc.addPage([W, H]).drawImage(img, { x: 0, y: 0, width: W, height: H });
+    const W = w || A4.w, H = h || A4.h, cw = c.width, ch = c.height;
+    const page = doc.addPage([W, H]);
+    page.drawImage(img, { x: 0, y: 0, width: W, height: H });
+    if (c.lines && c.lines.length) await Ink.add(doc, page, c.lines, (x, y) => [x * W / cw, H - y * H / ch]);
     c.width = c.height = 1;
   }
+}
+
+/* =====================================================================
+   VERSION 4.5 — texte sélectionnable et reconnaissance de texte (OCR).
+   Une couche de texte invisible (mode de rendu 3, police Liberation Sans)
+   est posée exactement sur les mots de l'image : le texte peut être
+   sélectionné, copié, cherché, lu à voix haute et exporté.
+   Sources des mots : la mise en page HTML (conversions Word, ODT,
+   PowerPoint, Excel, HTML, texte) ou Tesseract.js (OCR, sur l'appareil).
+   ===================================================================== */
+/* mots d'un document HTML affiché : position de chaque mot (pixels CSS) */
+function domWords(d) {
+  const out = [], rng = d.createRange(), tw = d.createTreeWalker(d.body, NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = tw.nextNode())) {
+    const s = n.nodeValue;
+    if (!s || !s.trim()) continue;
+    const re = /\S+/g; let m;
+    while ((m = re.exec(s))) {
+      rng.setStart(n, m.index); rng.setEnd(n, m.index + m[0].length);
+      const rs = Array.from(rng.getClientRects()).filter(r => r.width > 0 && r.height > 0);
+      if (!rs.length) continue;
+      if (rs.length === 1) { const r = rs[0]; out.push({ t: m[0], x0: r.left, x1: r.right, y0: r.top, y1: r.bottom }); continue; }
+      /* mot coupé en fin de ligne : un morceau par ligne */
+      let i0 = 0;
+      for (let i = 1; i <= m[0].length; i++) {
+        if (i < m[0].length) {
+          rng.setStart(n, m.index + i0); rng.setEnd(n, m.index + i + 1);
+          if (rng.getClientRects().length < 2) continue;
+        }
+        rng.setStart(n, m.index + i0); rng.setEnd(n, m.index + i);
+        const r = rng.getBoundingClientRect();
+        if (r.width > 0) out.push({ t: m[0].slice(i0, i), x0: r.left, x1: r.right, y0: r.top, y1: r.bottom });
+        i0 = i;
+      }
+    }
+  }
+  return out;
+}
+const scaleWord = (w, k, dy) => ({ t: w.t, x0: w.x0 * k, x1: w.x1 * k, y0: w.y0 * k - dy, y1: w.y1 * k - dy });
+/* regroupe des mots (ordre de lecture) en lignes : même hauteur, de gauche à droite, sans grand écart */
+function groupLines(words) {
+  const lines = [];
+  let L0 = null;
+  for (const w of words) {
+    const h = w.y1 - w.y0, c = (w.y0 + w.y1) / 2;
+    if (L0) {
+      const p = L0.words[L0.words.length - 1];
+      if (c > L0.y0 && c < L0.y1 && w.x0 >= p.x1 - h * 0.2 && w.x0 - p.x1 < h * 1.2) {
+        L0.words.push(w); L0.y0 = Math.min(L0.y0, w.y0); L0.y1 = Math.max(L0.y1, w.y1); continue;
+      }
+    }
+    L0 = { y0: w.y0, y1: w.y1, words: [w] }; lines.push(L0);
+  }
+  return lines;
+}
+
+const Ink = {
+  ttf: null,
+  /* police de la couche invisible : une par document pdf-lib */
+  async font(doc) {
+    if (doc.__ink) return doc.__ink;
+    await loadScript("vendor/fontkit.umd.min.js");
+    doc.registerFontkit(window.fontkit);
+    if (!Ink.ttf) Ink.ttf = new Uint8Array(await (await fetch("vendor/fonts/LiberationSans-Regular.ttf")).arrayBuffer());
+    const font = await doc.embedFont(Ink.ttf, { subset: true });
+    /* métriques de Liberation Sans (FontDescriptor : Ascent 905, Descent -212 pour 1000) */
+    doc.__ink = { font, charset: new Set(font.getCharacterSet()), h1: 1.117, desc: 0.212 };
+    return doc.__ink;
+  },
+  /* lines : [{ y0, y1, words: [{ t, x0, x1 }] }] en pixels d'une image (origine en haut à gauche) ;
+     toPdf(x, y) -> [X, Y] dans l'espace de la page PDF. Renvoie le nombre de mots posés. */
+  async add(doc, page, lines, toPdf) {
+    const L = window.PDFLib, ctx = doc.context, N = n => L.PDFName.of(n);
+    const { font, charset, h1, desc } = await Ink.font(doc);
+    const fName = page.node.newFontDictionary("FInk", font.ref);
+    const f = v => (+v).toFixed(3);
+    let ops = "", count = 0;
+    for (const ln of lines) {
+      const ws = ln.words;
+      for (let i = 0; i < ws.length; i++) {
+        const w = ws[i], last = i === ws.length - 1;
+        let t = Array.from(w.t).map(ch => charset.has(ch.codePointAt(0)) ? ch : "?").join("");
+        if (!t.trim()) continue;
+        if (!last) t += " ";
+        /* largeur visée : jusqu'au mot suivant (espace compris) */
+        const x1 = last ? w.x1 : Math.max(w.x1, ws[i + 1].x0);
+        /* hauteur : celle de la ligne, ou celle du mot si elle est connue (OCR : ligne de base) */
+        const top = w.ty0 != null ? w.ty0 : ln.y0, bot = w.ty1 != null ? w.ty1 : ln.y1;
+        const P0 = toPdf(w.x0, bot), P1 = toPdf(x1, bot), P2 = toPdf(w.x0, top);
+        const ux = P1[0] - P0[0], uy = P1[1] - P0[1], vx = P2[0] - P0[0], vy = P2[1] - P0[1];
+        const lu = Math.hypot(ux, uy), lv = Math.hypot(vx, vy);
+        if (lu < 0.1 || lv < 0.1) continue;
+        const size = lv / h1, w1 = font.widthOfTextAtSize(t, size);
+        const tz = clamp(lu / w1 * 100, 5, 2000);
+        const bx = P0[0] + vx / lv * desc * size, by = P0[1] + vy / lv * desc * size;
+        ops += f(ux / lu * size) + " " + f(uy / lu * size) + " " + f(vx / lv * size) + " " + f(vy / lv * size) + " " +
+          f(bx) + " " + f(by) + " Tm " + tz.toFixed(2) + " Tz " + font.encodeText(t).toString() + " Tj\n";
+        count++;
+      }
+    }
+    if (!ops) return 0;
+    /* contenu existant isolé entre q … Q, puis la couche de texte invisible */
+    const enc = new TextEncoder();
+    const qRef = ctx.register(ctx.stream(enc.encode("q\n")));
+    const inkRef = ctx.register(ctx.flateStream(enc.encode("Q\nq BT 3 Tr " + fName + " 1 Tf\n" + ops + "ET Q\n")));
+    const cur = page.node.get(N("Contents"));
+    let arr = [];
+    if (cur) { const o = ctx.lookup(cur); arr = o instanceof L.PDFArray ? o.asArray() : [cur]; }
+    page.node.set(N("Contents"), ctx.obj([qRef, ...arr, inkRef]));
+    return count;
+  }
+};
+
+/* --- OCR : Tesseract.js 7 (moteur LSTM, français), entièrement sur l'appareil.
+   Téléchargé à la première utilisation (~4,6 Mo), puis conservé hors ligne. */
+const OCR = {
+  w: null, onLog: null,
+  async worker() {
+    if (!OCR.w) {
+      OCR.w = (async () => {
+        await loadScript("vendor/tesseract/tesseract.min.js");
+        return window.Tesseract.createWorker("fra", 1, {
+          workerPath: absUrl("vendor/tesseract/worker.min.js"), corePath: absUrl("vendor/tesseract/core/"),
+          langPath: absUrl("vendor/tesseract/lang"), gzip: true, cacheMethod: "none", workerBlobURL: false,
+          logger: m => OCR.onLog && OCR.onLog(m),
+          errorHandler: e => console.warn("OCR :", e) });
+      })();
+      OCR.w.catch(() => { OCR.w = null; });
+    }
+    return OCR.w;
+  },
+  async done() { const p = OCR.w; OCR.w = null; if (p) { try { await (await p).terminate(); } catch (e) {} } },
+  /* lignes de mots reconnus dans une image (canvas), en pixels de l'image */
+  async lines(canvas) {
+    const w = await OCR.worker();
+    const { data } = await w.recognize(canvas, {}, { blocks: true, text: false });
+    const out = [];
+    for (const b of data.blocks || []) for (const p of b.paragraphs || []) for (const l of p.lines || []) {
+      /* ligne de base (interpolée le long de la ligne) : le texte invisible est posé dessus ;
+         taille du texte : hauteur de ligne mesurée par Tesseract (jambages compris, accents exclus) */
+      const bl = l.baseline && l.baseline.has_baseline !== false && l.baseline.x1 > l.baseline.x0 ? l.baseline : null;
+      const baseAt = x => bl ? bl.y0 + (bl.y1 - bl.y0) * (x - bl.x0) / (bl.x1 - bl.x0) : l.bbox.y1;
+      const rh = l.rowAttributes && l.rowAttributes.rowHeight;
+      const em = Math.max(4, rh > 0 ? rh * 1.05 : (l.bbox.y1 - l.bbox.y0) * 0.9);
+      const words = (l.words || []).filter(x => x.text && x.text.trim() && x.confidence > 20).map(x => {
+        const base = baseAt((x.bbox.x0 + x.bbox.x1) / 2);
+        return { t: x.text.trim(), x0: x.bbox.x0, x1: x.bbox.x1, ty0: base - 0.905 * em, ty1: base + 0.212 * em };
+      });
+      if (words.length) out.push({ y0: l.bbox.y0, y1: l.bbox.y1, words });
+    }
+    return out;
+  },
+  /* message de progression pour busy() */
+  progress(prefix) {
+    OCR.onLog = m => {
+      const st = { "loading tesseract core": "chargement du moteur", "initializing tesseract": "préparation",
+        "loading language traineddata": "chargement du français", "initializing api": "préparation",
+        "recognizing text": "lecture" }[m.status];
+      if (st) busy(true, prefix + " — " + st + (m.progress > 0 && m.progress < 1 ? " " + Math.round(m.progress * 100) + " %" : "") + "…");
+    };
+  }
+};
+/* image prête pour l'OCR : taille suffisante (~300 ppp pour une page A4), sans dépasser 9 Mpx */
+function ocrCanvas(src) {
+  const k = clamp(Math.min(2400 / Math.min(src.width, src.height), Math.sqrt(9e6 / (src.width * src.height))), 0.25, 3);
+  if (Math.abs(k - 1) < 0.05) return { c: src, k: 1 };
+  const c = document.createElement("canvas"); c.width = Math.round(src.width * k); c.height = Math.round(src.height * k);
+  const x = c.getContext("2d"); x.imageSmoothingQuality = "high"; x.drawImage(src, 0, 0, c.width, c.height);
+  return { c, k: c.width / src.width };
+}
+/* lignes OCR d'une image, ramenées aux pixels de l'image d'origine */
+async function ocrImage(src) {
+  const { c, k } = ocrCanvas(src);
+  const lines = await OCR.lines(c);
+  if (k !== 1) for (const l of lines) { l.y0 /= k; l.y1 /= k; for (const w of l.words) { w.x0 /= k; w.x1 /= k; w.ty0 /= k; w.ty1 /= k; } }
+  if (c !== src) c.width = c.height = 1;
+  return lines;
+}
+/* menu « Reconnaître le texte » : document affiché, annotations et champs conservés */
+async function ocrCurrent() {
+  if (!S.doc) return;
+  const keep = { items: S.items, values: S.values, wm: S.wm, name: S.name, cur: S.cur };
+  busy(true, "Reconnaissance du texte…");
+  let r;
+  try { r = await ocrPdf(S.bytes.slice(0)); }
+  catch (e) { console.error(e); busy(false); toast("Reconnaissance impossible : " + (e && e.message ? e.message : e), 6000); return; }
+  busy(false);
+  if (!r.pages) { toast("Toutes les pages contiennent déjà du texte : rien à reconnaître.", 4000); return; }
+  if (!(await openBytes(r.bytes, keep.name, { force: true, noRecent: true }))) return;
+  S.items = keep.items; S.values = keep.values; S.wm = keep.wm;
+  renderFields(); render(); updatePill();
+  Recents.addCurrent();
+  toast(r.words + " mots reconnus sur " + r.pages + " page" + (r.pages > 1 ? "s" : "") +
+    (r.already ? " (" + r.already + " page" + (r.already > 1 ? "s" : "") + " contenai" + (r.already > 1 ? "en" : "") + "t déjà du texte)" : "") +
+    " : le texte est maintenant sélectionnable et cherchable.", 5000);
+}
+/* OCR d'un PDF : chaque page sans texte reçoit une couche de texte invisible */
+async function ocrPdf(bytes, label) {
+  const L = window.PDFLib;
+  const src = await openPdf(bytes);
+  const doc = await L.PDFDocument.load(bytes, { updateMetadata: false });
+  const pages = doc.getPages();
+  let done = 0, words = 0, already = 0;
+  try {
+    for (let i = 0; i < src.numPages; i++) {
+      const pg = await src.getPage(i + 1);
+      const tc = await pg.getTextContent();
+      if (tc.items.reduce((n, it) => n + (it.str ? it.str.trim().length : 0), 0) > 20) { already++; pg.cleanup(); continue; }
+      OCR.progress((label || "Reconnaissance du texte") + " — page " + (i + 1) + " sur " + src.numPages);
+      const v1 = pg.getViewport({ scale: 1 });
+      const k = clamp(Math.min(2400 / Math.min(v1.width, v1.height), Math.sqrt(9e6 / (v1.width * v1.height))), 1, 5);
+      const vp = pg.getViewport({ scale: k });
+      const c = document.createElement("canvas"); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+      const cx = c.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0, 0, c.width, c.height);
+      await pg.render({ canvasContext: cx, viewport: vp }).promise;
+      pg.cleanup();
+      const lines = await OCR.lines(c);
+      c.width = c.height = 1;
+      words += await Ink.add(doc, pages[i], lines, (x, y) => vp.convertToPdfPoint(x, y));
+      done++;
+    }
+  } finally { try { await src.destroy(); } catch (e) {} await OCR.done(); OCR.onLog = null; }
+  return { bytes: done ? await doc.save() : null, pages: done, already, words };
 }
 
 /* --- OpenDocument texte -> HTML */
@@ -4158,7 +4402,9 @@ const Conv = {
     if (!files.length) return;
     const L = window.PDFLib;
     const out = await L.PDFDocument.create();
-    const fit = $("#convFit").value;
+    const fit = $("#convFit").value, ocr = $("#convOcr").checked;
+    PREF.convOcr = ocr; Prof.savePref();
+    Conv.words = 0;
     const skipped = [];
     busy(true, "Conversion…");
     try {
@@ -4169,7 +4415,8 @@ const Conv = {
         if (/\.(rtf|pages|key|numbers)$/i.test(low)) { skipped.push(name + " (format non pris en charge)"); continue; }
         try {
           if (/^image\//.test(f.type) || /\.(jpe?g|png|gif|webp|bmp|heic|heif|avif)$/i.test(low)) {
-            await Conv.image(out, f, fit);
+            if (ocr) OCR.progress("« " + name + " » : reconnaissance du texte");
+            await Conv.image(out, f, fit, ocr);
           } else if (/\.pdf$/i.test(low) || f.type === "application/pdf") {
             const src = await L.PDFDocument.load(new Uint8Array(await f.arrayBuffer()), { ignoreEncryption: true });
             (await out.copyPages(src, src.getPageIndices())).forEach(p => out.addPage(p));
@@ -4206,6 +4453,7 @@ const Conv = {
           } else { skipped.push(name + " (format inconnu)"); }
         } catch (e) { console.warn("conversion impossible :", name, e); skipped.push(name + " (" + e.message + ")"); }
       }
+      await OCR.done(); OCR.onLog = null;
       if (!out.getPageCount()) { busy(false); toast("Aucun fichier n'a pu être converti : " + skipped.join(", "), 7000); return; }
       const first = files[0].name.replace(/\.[^.]+$/, "") || "document";
       const bytes = await out.save();
@@ -4216,9 +4464,9 @@ const Conv = {
       else if (files.some(x => /\.(doc|dot|ppt|pps|pot)$/i.test(x.name || "")))
         toast("Ancien format Office : texte et structure repris, sans les images ni la mise en forme d'origine.", 6000);
       else toast("Conversion terminée : " + out.getPageCount() + " page" + (out.getPageCount() > 1 ? "s" : "") + ".", 3000);
-    } finally { busy(false); }
+    } finally { busy(false); OCR.done(); OCR.onLog = null; }
   },
-  async image(doc, f, fit) {
+  async image(doc, f, fit, ocr) {
     const url = URL.createObjectURL(f);
     try {
       const im = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error("image illisible par ce navigateur")); i.src = url; });
@@ -4230,15 +4478,23 @@ const Conv = {
       const blob = await new Promise(r => c.toBlob(r, png ? "image/png" : "image/jpeg", 0.92));
       const data = new Uint8Array(await blob.arrayBuffer());
       const img = png ? await doc.embedPng(data) : await doc.embedJpg(data);
+      let page, box;
       if (fit === "image") {
         const W = im.naturalWidth * 0.75, H = im.naturalHeight * 0.75;          /* 96 ppp -> points */
-        doc.addPage([W, H]).drawImage(img, { x: 0, y: 0, width: W, height: H });
+        box = { x: 0, y: 0, width: W, height: H };
+        page = doc.addPage([W, H]);
       } else {
         const land = im.naturalWidth > im.naturalHeight;
         const W = land ? A4.h : A4.w, H = land ? A4.w : A4.h, m = 28;
         const s = Math.min((W - 2 * m) / im.naturalWidth, (H - 2 * m) / im.naturalHeight);
         const w = im.naturalWidth * s, h = im.naturalHeight * s;
-        doc.addPage([W, H]).drawImage(img, { x: (W - w) / 2, y: (H - h) / 2, width: w, height: h });
+        box = { x: (W - w) / 2, y: (H - h) / 2, width: w, height: h };
+        page = doc.addPage([W, H]);
+      }
+      page.drawImage(img, box);
+      if (ocr) {
+        const lines = await ocrImage(c), cw = c.width, ch = c.height;
+        Conv.words += await Ink.add(doc, page, lines, (x, y) => [box.x + x * box.width / cw, box.y + box.height - y * box.height / ch]);
       }
       c.width = c.height = 1;
     } finally { URL.revokeObjectURL(url); }
@@ -5199,6 +5455,7 @@ function init() {
   /* signatures : chargement depuis IndexedDB (et migration), puis affichage */
   window.__appStore = store;                                       /* accès pour les tests */
   window.__pdfjsVersion = () => pdfjsLib && pdfjsLib.version;
+  window.__docBytes = () => S.bytes ? Array.from(S.bytes) : null;
   window.__storeReady = KV.load().then(() => { Sigs.render(); Prof.render(); },
     e => console.warn("IndexedDB :", e && e.message));
   initSigSheet();
@@ -5304,7 +5561,8 @@ function init() {
     },
     search() { closeSheet(); Search.open(); },
     print() { printDoc(); },
-    convert() { openSheet("shConv"); },
+    convert() { $("#convOcr").checked = PREF.convOcr !== false; openSheet("shConv"); },
+    ocr() { closeSheet(); ocrCurrent(); },
     compare() { closeSheet(); Cmp.start(); },
     wm() { WM.open(); },
     redact() { closeSheet(); setTool("redact"); },

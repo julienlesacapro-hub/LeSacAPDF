@@ -300,6 +300,8 @@ textarea.field { resize: none; line-height: 1.15; }
 input[type=range] { accent-color: var(--brand); }
 .chk { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 14.5px; }
 .chk input { width: 20px; height: 20px; accent-color: var(--brand); }
+.chk.dark { margin: 2px 0 4px; font-size: 13.5px; color: #e8edf5; }
+.chk.dark input { accent-color: #8fb3e8; }
 
 .opts { display: grid; gap: 8px; margin-top: 4px; }
 .opt { display: flex; gap: 12px; align-items: flex-start; border: 1.5px solid var(--line); border-radius: 14px; padding: 12px; }

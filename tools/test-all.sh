@@ -30,6 +30,7 @@ for d in $DEVS; do
                                                $F/doc.docx $F/doc.odt "$OUT/$d" "$d"
   run "$d-diaporama" node tools/e2e-show.js    $F/test.pdf "$OUT/$d" "$d"
   run "$d-stockage"  node tools/e2e-storage.js $F/test.pdf "$d"
+  run "$d-ocr"       node tools/e2e-ocr.js     $F "$OUT/$d" "$d"
 done
 case " $DEVS " in *" android "*) run "exports" node tools/e2e-export.js $F/test.pdf "$OUT/exports" ;; esac
 

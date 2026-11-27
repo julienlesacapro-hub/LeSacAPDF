@@ -55,6 +55,7 @@ Une seule fois : *Settings → Pages → Build and deployment → Source : **Git
 | **4.0** — Comparer | deux PDF côte à côte, lignes modifiées surlignées (A rouge / B vert), navigation de différence en différence, mode visuel (pixels) |
 | **4.3** — Diaporama | lecture plein écran, une page à la fois : toucher à droite / à gauche, balayage, flèches ou espace ; commandes au centre ; écran maintenu allumé ; s'adapte à la rotation ; annotations et filigrane affichés |
 | **4.4** — Sécurité et fiabilité | pdf.js 6.5 (correctifs de sécurité à jour, repli automatique sur la 3.11 pour les téléphones trop anciens), politique de sécurité du contenu (CSP) : aucun script ni ressource extérieure ne peut être chargé ; signatures enregistrées dans IndexedDB (au-delà des ~5 Mo du stockage précédent, migration automatique) ; tests automatiques à chaque pull request |
+| **4.5** — Texte sélectionnable et OCR | conversions Word, ODT, PowerPoint, Excel, HTML et texte : texte sélectionnable, cherchable et copiable, posé exactement sur la page ; **reconnaissance de texte (OCR)** sur le téléphone, sans envoi (Tesseract.js, français) : scanner (option cochée par défaut), conversion d'images, et menu « Reconnaître le texte » pour un PDF déjà ouvert (annotations conservées) ; les exports Word, texte et PDF/A d'un scan reprennent le texte reconnu |
 | Confort mobile | pincer pour zoomer, annuler/rétablir, aperçu des pages, mode sombre, hors connexion |
 
 Bon à savoir : sur iPhone, les signatures et textes enregistrés de l'application installée sont
@@ -71,7 +72,8 @@ npm run icons                  # régénère les icônes depuis design/sac-sourc
 ```
 
 Séries : `e2e-test.js` (éditeur), `e2e-v31.js` (pages, scanner, recherche…), `e2e-v4.js` (filigrane, chiffrement,
-PDF/A, conversions…), `e2e-show.js` (diaporama), `e2e-storage.js` (signatures, pdf.js, CSP), `e2e-export.js` (exports).
+PDF/A, conversions…), `e2e-show.js` (diaporama), `e2e-storage.js` (signatures, pdf.js, CSP), `e2e-ocr.js` (texte sélectionnable, OCR),
+`e2e-export.js` (exports).
 Prérequis hors npm : `pdftotext` et `pdfinfo` (paquet poppler-utils).
 
 Le workflow `.github/workflows/tests.yml` les lance sur GitHub à chaque pull request et à chaque envoi sur `main`.
@@ -103,7 +105,10 @@ puis augmentez `VERSION` dans `www/sw.js` pour que les téléphones récupèrent
 Bibliothèques incluses : [pdf.js 6.5.438](https://github.com/mozilla/pdf.js) (Apache 2.0, variante *legacy*,
 dans `vendor/pdfjs/`, avec ses décodeurs WebAssembly OpenJPEG, JBIG2 et qcms), pdf.js 3.11.174 en secours pour
 les navigateurs antérieurs à Safari 18 / Chrome 125 (`vendor/pdfjs-3/`), et [pdf-lib 1.17.1](https://github.com/Hopding/pdf-lib)
-(MIT) ; pour la conversion vers PDF :
+(MIT) ; pour la reconnaissance de texte : [Tesseract.js 7.0.0](https://github.com/naptha/tesseract.js) et
+tesseract.js-core 7.0.0 (Apache 2.0, moteur Tesseract LSTM compilé en WebAssembly) avec les données françaises
+`fra` *best_int* de [tessdata](https://github.com/tesseract-ocr/tessdata_best) (Apache 2.0), dans `vendor/tesseract/`,
+téléchargés à la première reconnaissance puis conservés hors ligne ; pour la conversion vers PDF :
 [html2canvas 1.4.1](https://github.com/niklasvh/html2canvas) (MIT), [mammoth 1.13.0](https://github.com/mwilliamson/mammoth.js)
 (BSD-2), [cfb 1.2.2](https://github.com/SheetJS/js-cfb) (Apache 2.0, lecture des fichiers .doc, .ppt et .xls) et
 [@pdf-lib/fontkit 1.1.1](https://github.com/Hopding/fontkit) (MIT) avec la police [Liberation Sans](https://github.com/liberationfonts) (SIL OFL 1.1,
