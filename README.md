@@ -54,6 +54,7 @@ Une seule fois : *Settings → Pages → Build and deployment → Source : **Git
 | **4.0** — Censure définitive | rectangles noirs ou « censurer tous les résultats » d'une recherche ; les pages concernées sont rastérisées à l'enregistrement : le contenu caché est supprimé |
 | **4.0** — Comparer | deux PDF côte à côte, lignes modifiées surlignées (A rouge / B vert), navigation de différence en différence, mode visuel (pixels) |
 | **4.3** — Diaporama | lecture plein écran, une page à la fois : toucher à droite / à gauche, balayage, flèches ou espace ; commandes au centre ; écran maintenu allumé ; s'adapte à la rotation ; annotations et filigrane affichés |
+| **4.4** — Sécurité et fiabilité | pdf.js 6.5 (correctifs de sécurité à jour, repli automatique sur la 3.11 pour les téléphones trop anciens), politique de sécurité du contenu (CSP) : aucun script ni ressource extérieure ne peut être chargé ; signatures enregistrées dans IndexedDB (au-delà des ~5 Mo du stockage précédent, migration automatique) ; tests automatiques à chaque pull request |
 | Confort mobile | pincer pour zoomer, annuler/rétablir, aperçu des pages, mode sombre, hors connexion |
 
 Bon à savoir : sur iPhone, les signatures et textes enregistrés de l'application installée sont
@@ -62,14 +63,23 @@ séparés de ceux de Safari. Utilisez *Menu → Sauvegarder / restaurer* pour le
 ## Développement
 
 ```bash
-npm run serve                                         # http://localhost:8080
-node tools/e2e-test.js fichier.pdf captures/ android   # test complet sur téléphone émulé (ou: iphone)
-node tools/e2e-v31.js a.pdf b.pdf photo.jpg captures/ android   # test des fonctions 3.1
-node tools/e2e-export.js a.pdf captures/                        # test des exports image / Word / ODT / texte
-node tools/e2e-show.js a.pdf captures/ android                  # test du diaporama
-node tools/e2e-v4.js a.pdf b.pdf photo.jpg image.png page.html doc.docx doc.odt captures/ android   # test 4.0
-npm run icons                                         # régénère les icônes depuis design/sac-source.jpg
+npm ci                         # installe Playwright (version figée dans package-lock.json)
+npm run serve                  # http://localhost:8080
+npm test                       # toutes les séries de tests, Android et iPhone émulés (fichiers : tests/fixtures/)
+tools/test-all.sh android      # un seul appareil ; résultats et captures dans test-results/
+npm run icons                  # régénère les icônes depuis design/sac-source.jpg
 ```
+
+Séries : `e2e-test.js` (éditeur), `e2e-v31.js` (pages, scanner, recherche…), `e2e-v4.js` (filigrane, chiffrement,
+PDF/A, conversions…), `e2e-show.js` (diaporama), `e2e-storage.js` (signatures, pdf.js, CSP), `e2e-export.js` (exports).
+Prérequis hors npm : `pdftotext` et `pdfinfo` (paquet poppler-utils).
+
+Le workflow `.github/workflows/tests.yml` les lance sur GitHub à chaque pull request et à chaque envoi sur `main`.
+Pour empêcher la fusion d'une PR dont les tests échouent : *Settings → Rules → Rulesets* → la règle de `main` →
+**Require status checks to pass** → ajouter `Tests (android)` et `Tests (iphone)`.
+
+**Sécurité** : `index.html` contient une politique de sécurité du contenu (balise `<meta http-equiv="Content-Security-Policy">`).
+Toute nouvelle ressource extérieure (police, script, image distante) sera bloquée tant qu'elle n'y est pas ajoutée.
 
 À chaque nouvelle version, augmentez aussi `VERSION` dans `www/sw.js` : l'ancien cache
 est alors purgé proprement.
@@ -90,9 +100,10 @@ puis augmentez `VERSION` dans `www/sw.js` pour que les téléphones récupèrent
 
 © 2026 LESACA Julien — Tous droits réservés. Voir [LICENSE](LICENSE).
 
-Bibliothèques incluses : [pdf.js 3.11.174](https://github.com/mozilla/pdf.js) (Apache 2.0,
-variante *legacy* pour les iPhone plus anciens) et [pdf-lib 1.17.1](https://github.com/Hopding/pdf-lib)
-(MIT), mêmes versions que dans `EditeurPDF.html` ; pour la conversion vers PDF :
+Bibliothèques incluses : [pdf.js 6.5.438](https://github.com/mozilla/pdf.js) (Apache 2.0, variante *legacy*,
+dans `vendor/pdfjs/`, avec ses décodeurs WebAssembly OpenJPEG, JBIG2 et qcms), pdf.js 3.11.174 en secours pour
+les navigateurs antérieurs à Safari 18 / Chrome 125 (`vendor/pdfjs-3/`), et [pdf-lib 1.17.1](https://github.com/Hopding/pdf-lib)
+(MIT) ; pour la conversion vers PDF :
 [html2canvas 1.4.1](https://github.com/niklasvh/html2canvas) (MIT), [mammoth 1.13.0](https://github.com/mwilliamson/mammoth.js)
 (BSD-2), [cfb 1.2.2](https://github.com/SheetJS/js-cfb) (Apache 2.0, lecture des fichiers .doc, .ppt et .xls) et
 [@pdf-lib/fontkit 1.1.1](https://github.com/Hopding/fontkit) (MIT) avec la police [Liberation Sans](https://github.com/liberationfonts) (SIL OFL 1.1,

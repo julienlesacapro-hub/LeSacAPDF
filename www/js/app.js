@@ -7,13 +7,46 @@
 (function () {
 "use strict";
 
-const APP_VERSION = "4.3.0";
+const APP_VERSION = "4.4.0";
 
 /* Lien de la page de don de l'association PROMEDNAV.
    À RENSEIGNER : tant qu'il est vide, le bouton « Faire un don » affiche
    « Le lien de don sera activé prochainement ». */
 const DON_URL = "";
-pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js";
+
+/* ------------------------------------------------------------- pdf.js
+   Version 6.5 (à jour des correctifs de sécurité), chargée à la première
+   ouverture d'un document. Repli automatique sur la version 3.11 pour les
+   navigateurs trop anciens pour la version 6 (Safari < 18, Chrome < 125).  */
+let pdfjsLib = null, pdfjsOld = false, pdfjsP = null;
+const absUrl = p => new URL(p, document.baseURI).href;
+function loadPdfjs(old) {
+  if (!old) return import(absUrl("vendor/pdfjs/pdf.min.js")).then(m => {
+    m.GlobalWorkerOptions.workerSrc = absUrl("vendor/pdfjs/pdf.worker.min.js"); return m; });
+  return loadScript("vendor/pdfjs-3/pdf.min.js").then(() => {
+    const m = window.pdfjsLib; m.GlobalWorkerOptions.workerSrc = "vendor/pdfjs-3/pdf.worker.min.js"; return m; });
+}
+/* copie des octets : pdf.js 6 transfère les données au worker (l'original deviendrait vide) */
+const pdfjsParams = (bytes, old) => {
+  const data = new Uint8Array(bytes instanceof ArrayBuffer ? bytes.slice(0) : bytes);
+  return old ? { data, isEvalSupported: false } : { data, isEvalSupported: false, wasmUrl: absUrl("vendor/pdfjs/wasm/") };
+};
+async function openPdf(bytes) {
+  if (!pdfjsP) pdfjsP = loadPdfjs(false).catch(e => {
+    console.warn("pdf.js 6 indisponible, repli sur la version 3.11 :", e && e.message);
+    pdfjsOld = true; return loadPdfjs(true); });
+  pdfjsLib = await pdfjsP;
+  try { return await pdfjsLib.getDocument(pdfjsParams(bytes, pdfjsOld)).promise; }
+  catch (e) {
+    /* PDF protégé ou invalide : l'erreur concerne le fichier, pas le navigateur */
+    if (pdfjsOld || /Password|InvalidPDF|MissingPDF/.test(e && e.name)) throw e;
+    let old; try { old = await loadPdfjs(true); } catch (e2) { throw e; }
+    const doc = await old.getDocument(pdfjsParams(bytes, true)).promise;
+    console.warn("pdf.js 6 en échec sur ce navigateur, repli sur la version 3.11 :", e && e.message);
+    pdfjsOld = true; pdfjsLib = old; pdfjsP = Promise.resolve(old);
+    return doc;
+  }
+}
 
 /* ---------------------------------------------------------------- outils */
 const $  = (s, r) => (r || document).querySelector(s);
@@ -37,14 +70,72 @@ function busy(on, txt) {
   $("#spinTxt").textContent = txt || "Chargement…";
   $("#spin").classList.toggle("on", !!on);
 }
-const memStore = {};
+/* Réglages : localStorage (petit, synchrone). Signatures (images, volumineuses) :
+   IndexedDB, dont la capacité est bien supérieure aux ~5 Mo du localStorage.
+   Lecture et écriture restent synchrones grâce au cache en mémoire ; les
+   signatures d'une version précédente sont migrées au premier lancement.   */
+const memStore = {}, dirty = new Set();   /* dirty : modifié avant la fin du chargement */
+const isBig = k => /^sigs\./.test(k);
+const lsSet = (k, v) => {
+  try { localStorage.setItem("pdfed." + k, JSON.stringify(v)); return true; } catch (e) {
+    toast("Mémoire de l'application pleine : conservé jusqu'à la fermeture.", 5000); return false; } };
+const KV = {
+  _p: null,
+  db() {
+    if (this._p) return this._p;
+    this._p = new Promise((res, rej) => {
+      if (!window.indexedDB) { rej(new Error("IndexedDB indisponible")); return; }
+      const r = indexedDB.open("lesacapdf-data", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("kv");
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+      r.onblocked = () => rej(new Error("IndexedDB bloquée"));
+    });
+    return this._p;
+  },
+  async tx(mode, fn) {
+    const db = await this.db();
+    return new Promise((res, rej) => {
+      const t = db.transaction("kv", mode), req = fn(t.objectStore("kv"));
+      t.oncomplete = () => res(req ? req.result : undefined);
+      t.onerror = () => rej(t.error); t.onabort = () => rej(t.error);
+    });
+  },
+  put(k, v) { return this.tx("readwrite", st => st.put(v, k)); },
+  del(k) { return this.tx("readwrite", st => st.delete(k)); },
+  /* chargement au démarrage + migration depuis le localStorage */
+  async load() {
+    const keys = await this.tx("readonly", st => st.getAllKeys());
+    const vals = await this.tx("readonly", st => st.getAll());
+    keys.forEach((k, i) => { if (!dirty.has(k)) memStore[k] = vals[i]; });
+    const legacy = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("pdfed.") && isBig(k.slice(6))) legacy.push(k.slice(6));
+    }
+    for (const k of legacy) {
+      let v; try { v = JSON.parse(localStorage.getItem("pdfed." + k)); } catch (e) { continue; }
+      if (v == null) continue;
+      /* présent dans le localStorage : jamais migré, ou plus récent (IndexedDB en échec) */
+      if (!dirty.has(k)) memStore[k] = v;
+      await this.put(k, memStore[k]);
+      localStorage.removeItem("pdfed." + k);
+    }
+    return legacy.length;
+  }
+};
 const store = {
   get(k, d) { if (k in memStore) return memStore[k];
     try { const v = JSON.parse(localStorage.getItem("pdfed." + k)); if (v != null) return v; } catch (e) {}
     return d; },
-  set(k, v) { memStore[k] = v;
-    try { localStorage.setItem("pdfed." + k, JSON.stringify(v)); } catch (e) {
-    toast("Mémoire de l'application pleine : conservé jusqu'à la fermeture.", 5000); } }
+  set(k, v) { memStore[k] = v; dirty.add(k);
+    if (!isBig(k)) { lsSet(k, v); return; }
+    KV.put(k, v).then(() => { try { localStorage.removeItem("pdfed." + k); } catch (e) {} },
+      () => lsSet(k, v));   /* IndexedDB indisponible : ancien fonctionnement */
+  },
+  remove(k) { delete memStore[k];
+    try { localStorage.removeItem("pdfed." + k); } catch (e) {}
+    if (isBig(k)) KV.del(k).catch(() => {}); }
 };
 const CSS_FONT = { Helvetica: "Helvetica,Arial,sans-serif", Times: '"Times New Roman",Times,serif',
                    Courier: '"Courier New",Courier,monospace' };
@@ -112,10 +203,7 @@ const Prof = {
     let list = Prof.list();
     if (list.length < 2) { toast("Il faut conserver au moins un utilisateur."); return; }
     list = list.filter(x => x.id !== Prof.id);
-    ["sigs.", "snips.", "pref."].forEach(p => {
-      delete memStore[p + Prof.id];
-      try { localStorage.removeItem("pdfed." + p + Prof.id); } catch (e) {}
-    });
+    ["sigs.", "snips.", "pref.", "stamps."].forEach(p => store.remove(p + Prof.id));
     store.set("profiles", list);
     Prof.use(list[0].id);
   },
@@ -277,7 +365,7 @@ async function openBytes(bytes, name, opt) {
       "Les annotations non enregistrées du document actuel seront perdues.", null))) return false;
   busy(true, "Lecture du PDF…");
   try {
-    const doc = await pdfjsLib.getDocument({ data: bytes.slice(0), isEvalSupported: false }).promise;
+    const doc = await openPdf(bytes.slice(0));
     if (S.doc) { try { S.doc.destroy(); } catch (e) {} }
     S.doc = doc;
     S.bytes = bytes.slice(0);                      // copie intacte pour l'export
@@ -477,7 +565,8 @@ async function readFormFields() {
     for (const a of annots) {
       if (a.subtype !== "Widget" || !a.fieldName) continue;
       if (a.fieldType === "Btn" && a.pushButton) continue;
-      const r = pdfjsLib.Util.normalizeRect(vp.convertToViewportRectangle(a.rect));
+      const q1 = vp.convertToViewportPoint(a.rect[0], a.rect[1]), q2 = vp.convertToViewportPoint(a.rect[2], a.rect[3]);
+      const r = [Math.min(q1[0], q2[0]), Math.min(q1[1], q2[1]), Math.max(q1[0], q2[0]), Math.max(q1[1], q2[1])];
       const f = {
         name: a.fieldName, type: a.fieldType, page: p.num - 1,
         x: r[0], y: r[1], w: r[2] - r[0], h: r[3] - r[1],
@@ -1666,7 +1755,7 @@ async function buildSmall(targetBytes, gray) {
     const plein = await buildVector();
     if (!gray && plein.length <= targetBytes) return { bytes: plein, mode: "vector" };
     const base = await buildVector({ skipItems: true });
-    src = await pdfjsLib.getDocument({ data: base, isEvalSupported: false }).promise;
+    src = await openPdf(base);
   } catch (e) { console.warn("base vectorielle indisponible, pages d'origine :", e); }
 
   const n = S.pages.length;
@@ -2202,7 +2291,7 @@ async function printDoc() {
   try {
     clearPrint();
     const bytes = await buildVector();
-    doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+    doc = await openPdf(bytes);
     const area = $("#printArea"), cv = document.createElement("canvas"), cx = cv.getContext("2d", { alpha: false });
     const dpi = isIOS ? 130 : 150;
     for (let i = 1; i <= doc.numPages; i++) {
@@ -2279,7 +2368,7 @@ const Org = {
 
   async addSource(bytes, name, isCurrent) {
     const id = "s" + (Org.n++);
-    const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0), isEvalSupported: false }).promise;
+    const pdf = await openPdf(bytes.slice(0));
     const src = { id, name, bytes: bytes.slice(0), pdf, color: SRC_COLORS[Org.order.length % SRC_COLORS.length],
                   letter: String.fromCharCode(65 + Org.order.length), current: !!isCurrent, rot: [] };
     for (let i = 1; i <= pdf.numPages; i++) {
@@ -2975,7 +3064,7 @@ function zipStore(entries) {
 
 /* --- rendu des pages du PDF annoté en images */
 async function renderPages(bytes, dpi, type, onPage) {
-  const doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+  const doc = await openPdf(bytes);
   const out = [], cv = document.createElement("canvas"), cx = cv.getContext("2d", { alpha: false });
   const cap = isIOS ? 9e6 : 16e6;
   try {
@@ -3000,7 +3089,7 @@ async function renderPages(bytes, dpi, type, onPage) {
 
 /* --- extraction du texte : lignes puis paragraphes, page par page */
 async function extractText(bytes) {
-  const doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+  const doc = await openPdf(bytes);
   const pages = [];
   try {
     for (let i = 1; i <= doc.numPages; i++) {
@@ -3379,7 +3468,7 @@ async function burnRedactions(bytes) {
   const pagesIdx = [...new Set(S.items.filter(it => it.type === "redact").map(it => it.page))].sort((a, b) => a - b);
   if (!pagesIdx.length) return bytes;
   const L = window.PDFLib;
-  const src = await pdfjsLib.getDocument({ data: bytes.slice(0), isEvalSupported: false }).promise;
+  const src = await openPdf(bytes.slice(0));
   const doc = await L.PDFDocument.load(bytes, { updateMetadata: false });
   const cv = document.createElement("canvas"), cx = cv.getContext("2d", { alpha: false });
   try {
@@ -3503,7 +3592,7 @@ async function encryptPdf(bytes, password) {
 const SRGB_ICC_B64 = "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";
 /* couche de texte : lignes regroupées en paragraphes, matrices en coordonnées de sortie */
 async function textLayer(bytes) {
-  const doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+  const doc = await openPdf(bytes);
   const pages = [];
   try {
     for (let i = 1; i <= doc.numPages; i++) {
@@ -3719,7 +3808,7 @@ async function buildPptx(bytes, title, mode) {
    Une feuille par page ; chaque ligne de texte devient une ligne du tableur,
    découpée en colonnes selon l'alignement horizontal du texte. */
 async function extractCells(bytes) {
-  const doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+  const doc = await openPdf(bytes);
   const sheets = [];
   try {
     for (let i = 1; i <= doc.numPages; i++) {
@@ -4210,7 +4299,7 @@ const Cmp = {
     try {
       const bytes = await buildVector();
       Cmp.cleanup();
-      Cmp.a = { name: S.name, pdf: await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise };
+      Cmp.a = { name: S.name, pdf: await openPdf(bytes) };
     } finally { busy(false); }
     $("#cmpTitle").textContent = "Comparer « " + S.name.replace(/\.pdf$/i, "") + " »";
     $("#cmpSub").textContent = "Choisissez le second PDF à comparer";
@@ -4230,7 +4319,7 @@ const Cmp = {
     busy(true, "Lecture du second document…");
     try {
       if (Cmp.b) { try { Cmp.b.pdf.destroy(); } catch (e) {} }
-      Cmp.b = { name: file.name, pdf: await pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false }).promise };
+      Cmp.b = { name: file.name, pdf: await openPdf(new Uint8Array(await file.arrayBuffer())) };
       busy(true, "Analyse des différences…");
       const LA = await pageLines(Cmp.a.pdf), LB = await pageLines(Cmp.b.pdf);
       const n = Math.max(LA.length, LB.length);
@@ -4789,7 +4878,7 @@ const Show = {
     busy(true, "Préparation du diaporama…");
     try {
       const bytes = await buildVector();
-      Show.pdf = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+      Show.pdf = await openPdf(bytes);
     } catch (e) { busy(false); toast("Diaporama impossible : " + e.message, 5000); return; }
     busy(false);
     Show.n = Show.pdf.numPages; Show.i = clamp(from || 0, 0, Show.n - 1); Show.cache.clear();
@@ -5107,6 +5196,11 @@ function init() {
   initV4();
   initShow();
   Prof.init();
+  /* signatures : chargement depuis IndexedDB (et migration), puis affichage */
+  window.__appStore = store;                                       /* accès pour les tests */
+  window.__pdfjsVersion = () => pdfjsLib && pdfjsLib.version;
+  window.__storeReady = KV.load().then(() => { Sigs.render(); Prof.render(); },
+    e => console.warn("IndexedDB :", e && e.message));
   initSigSheet();
   initPinch();
   initKeyboard();
