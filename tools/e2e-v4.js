@@ -116,8 +116,9 @@ const pdfStreams = f => {
   await p.waitForSelector(".cmp-row", { timeout: 30000 }).catch(async e => { await shot(p, "erreur-comparaison"); throw e; });
   await p.waitForTimeout(800);
   const cnt = await p.locator("#cmpCount").textContent();
-  ok(/1 différence/.test(cnt) && await p.locator(".cmp-hl.del").count() === 1 && await p.locator(".cmp-hl.add").count() === 1,
-    "comparaison texte : « " + cnt + " », ligne modifiée surlignée des deux côtés");
+  ok(/1 différence/.test(cnt) && await p.locator(".cmp-hl.line.del").count() === 1 && await p.locator(".cmp-hl.line.add").count() === 1
+    && await p.locator(".cmp-hl.del:not(.line)").count() >= 1 && await p.locator(".cmp-hl.add:not(.line)").count() >= 1,
+    "comparaison texte : « " + cnt + " », ligne modifiée teintée et mots changés surlignés des deux côtés");
   await p.locator("#cmpNext").tap(); await p.waitForTimeout(500);
   await shot(p, "5-comparaison-texte");
   await p.locator('#cmpMode [data-m=visual]').tap(); await p.waitForTimeout(1500);

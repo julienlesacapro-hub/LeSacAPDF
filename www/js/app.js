@@ -7,13 +7,49 @@
 (function () {
 "use strict";
 
-const APP_VERSION = "4.3.0";
+const APP_VERSION = "4.7.0";
 
 /* Lien de la page de don de l'association PROMEDNAV.
    À RENSEIGNER : tant qu'il est vide, le bouton « Faire un don » affiche
    « Le lien de don sera activé prochainement ». */
 const DON_URL = "";
-pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js";
+
+/* ------------------------------------------------------------- pdf.js
+   Version 6.5 (à jour des correctifs de sécurité), chargée à la première
+   ouverture d'un document. Repli automatique sur la version 3.11 pour les
+   navigateurs trop anciens pour la version 6 (Safari < 18, Chrome < 125).  */
+let pdfjsLib = null, pdfjsOld = false, pdfjsP = null;
+let docPassword = null;     /* PDF chiffré ouvert en lecture seule (modification interdite par l'auteur) */
+const absUrl = p => new URL(p, document.baseURI).href;
+function loadPdfjs(old) {
+  if (!old) return import(absUrl("vendor/pdfjs/pdf.min.js")).then(m => {
+    m.GlobalWorkerOptions.workerSrc = absUrl("vendor/pdfjs/pdf.worker.min.js"); return m; });
+  return loadScript("vendor/pdfjs-3/pdf.min.js").then(() => {
+    const m = window.pdfjsLib; m.GlobalWorkerOptions.workerSrc = "vendor/pdfjs-3/pdf.worker.min.js"; return m; });
+}
+/* copie des octets : pdf.js 6 transfère les données au worker (l'original deviendrait vide) */
+const pdfjsParams = (bytes, old) => {
+  const data = new Uint8Array(bytes instanceof ArrayBuffer ? bytes.slice(0) : bytes);
+  const p = old ? { data, isEvalSupported: false } : { data, isEvalSupported: false, wasmUrl: absUrl("vendor/pdfjs/wasm/") };
+  if (docPassword != null) p.password = docPassword;
+  return p;
+};
+async function openPdf(bytes) {
+  if (!pdfjsP) pdfjsP = loadPdfjs(false).catch(e => {
+    console.warn("pdf.js 6 indisponible, repli sur la version 3.11 :", e && e.message);
+    pdfjsOld = true; return loadPdfjs(true); });
+  pdfjsLib = await pdfjsP;
+  try { return await pdfjsLib.getDocument(pdfjsParams(bytes, pdfjsOld)).promise; }
+  catch (e) {
+    /* PDF protégé ou invalide : l'erreur concerne le fichier, pas le navigateur */
+    if (pdfjsOld || /Password|InvalidPDF|MissingPDF/.test(e && e.name)) throw e;
+    let old; try { old = await loadPdfjs(true); } catch (e2) { throw e; }
+    const doc = await old.getDocument(pdfjsParams(bytes, true)).promise;
+    console.warn("pdf.js 6 en échec sur ce navigateur, repli sur la version 3.11 :", e && e.message);
+    pdfjsOld = true; pdfjsLib = old; pdfjsP = Promise.resolve(old);
+    return doc;
+  }
+}
 
 /* ---------------------------------------------------------------- outils */
 const $  = (s, r) => (r || document).querySelector(s);
@@ -37,14 +73,72 @@ function busy(on, txt) {
   $("#spinTxt").textContent = txt || "Chargement…";
   $("#spin").classList.toggle("on", !!on);
 }
-const memStore = {};
+/* Réglages : localStorage (petit, synchrone). Signatures (images, volumineuses) :
+   IndexedDB, dont la capacité est bien supérieure aux ~5 Mo du localStorage.
+   Lecture et écriture restent synchrones grâce au cache en mémoire ; les
+   signatures d'une version précédente sont migrées au premier lancement.   */
+const memStore = {}, dirty = new Set();   /* dirty : modifié avant la fin du chargement */
+const isBig = k => /^sigs\./.test(k);
+const lsSet = (k, v) => {
+  try { localStorage.setItem("pdfed." + k, JSON.stringify(v)); return true; } catch (e) {
+    toast("Mémoire de l'application pleine : conservé jusqu'à la fermeture.", 5000); return false; } };
+const KV = {
+  _p: null,
+  db() {
+    if (this._p) return this._p;
+    this._p = new Promise((res, rej) => {
+      if (!window.indexedDB) { rej(new Error("IndexedDB indisponible")); return; }
+      const r = indexedDB.open("lesacapdf-data", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("kv");
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+      r.onblocked = () => rej(new Error("IndexedDB bloquée"));
+    });
+    return this._p;
+  },
+  async tx(mode, fn) {
+    const db = await this.db();
+    return new Promise((res, rej) => {
+      const t = db.transaction("kv", mode), req = fn(t.objectStore("kv"));
+      t.oncomplete = () => res(req ? req.result : undefined);
+      t.onerror = () => rej(t.error); t.onabort = () => rej(t.error);
+    });
+  },
+  put(k, v) { return this.tx("readwrite", st => st.put(v, k)); },
+  del(k) { return this.tx("readwrite", st => st.delete(k)); },
+  /* chargement au démarrage + migration depuis le localStorage */
+  async load() {
+    const keys = await this.tx("readonly", st => st.getAllKeys());
+    const vals = await this.tx("readonly", st => st.getAll());
+    keys.forEach((k, i) => { if (!dirty.has(k)) memStore[k] = vals[i]; });
+    const legacy = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("pdfed.") && isBig(k.slice(6))) legacy.push(k.slice(6));
+    }
+    for (const k of legacy) {
+      let v; try { v = JSON.parse(localStorage.getItem("pdfed." + k)); } catch (e) { continue; }
+      if (v == null) continue;
+      /* présent dans le localStorage : jamais migré, ou plus récent (IndexedDB en échec) */
+      if (!dirty.has(k)) memStore[k] = v;
+      await this.put(k, memStore[k]);
+      localStorage.removeItem("pdfed." + k);
+    }
+    return legacy.length;
+  }
+};
 const store = {
   get(k, d) { if (k in memStore) return memStore[k];
     try { const v = JSON.parse(localStorage.getItem("pdfed." + k)); if (v != null) return v; } catch (e) {}
     return d; },
-  set(k, v) { memStore[k] = v;
-    try { localStorage.setItem("pdfed." + k, JSON.stringify(v)); } catch (e) {
-    toast("Mémoire de l'application pleine : conservé jusqu'à la fermeture.", 5000); } }
+  set(k, v) { memStore[k] = v; dirty.add(k);
+    if (!isBig(k)) { lsSet(k, v); return; }
+    KV.put(k, v).then(() => { try { localStorage.removeItem("pdfed." + k); } catch (e) {} },
+      () => lsSet(k, v));   /* IndexedDB indisponible : ancien fonctionnement */
+  },
+  remove(k) { delete memStore[k];
+    try { localStorage.removeItem("pdfed." + k); } catch (e) {}
+    if (isBig(k)) KV.del(k).catch(() => {}); }
 };
 const CSS_FONT = { Helvetica: "Helvetica,Arial,sans-serif", Times: '"Times New Roman",Times,serif',
                    Courier: '"Courier New",Courier,monospace' };
@@ -112,10 +206,7 @@ const Prof = {
     let list = Prof.list();
     if (list.length < 2) { toast("Il faut conserver au moins un utilisateur."); return; }
     list = list.filter(x => x.id !== Prof.id);
-    ["sigs.", "snips.", "pref."].forEach(p => {
-      delete memStore[p + Prof.id];
-      try { localStorage.removeItem("pdfed." + p + Prof.id); } catch (e) {}
-    });
+    ["sigs.", "snips.", "pref.", "stamps."].forEach(p => store.remove(p + Prof.id));
     store.set("profiles", list);
     Prof.use(list[0].id);
   },
@@ -190,7 +281,7 @@ let curSheet = null;
 function openSheet(id) {
   const el = $("#" + id);
   if (curSheet && curSheet !== el) curSheet.classList.remove("on");
-  else if (!curSheet) { try { history.pushState({ sheet: 1 }, ""); } catch (e) {} }
+  else if (!curSheet) ensureGuard();
   curSheet = el;
   el.classList.add("on");
   el.scrollTop = 0;
@@ -206,24 +297,31 @@ function hideSheet() {
   document.activeElement && document.activeElement.blur && document.activeElement.blur();
   if (el._onclose) { const f = el._onclose; el._onclose = null; f(); }
 }
-/* un seul « retour » à la fois : un second history.back() avant le popstate
-   ferait quitter l'application */
-let backPending = false;
+/* Bouton « retour » d'Android : une entrée d'historique « garde » est ajoutée quand
+   une fenêtre ou un panneau s'ouvre ; le retour du téléphone la retire et ferme la
+   fenêtre du dessus. L'application ne déclenche jamais history.back() elle-même :
+   ce retour différé pouvait fermer une fenêtre ouverte entre-temps (nouvelle demande
+   de mot de passe, confirmation à la sortie du scanner) ou, compté de travers, faire
+   quitter l'application. Fermer une fenêtre la masque immédiatement.               */
+function ensureGuard() {
+  if (history.state && history.state.lsg) return;
+  try { history.pushState({ lsg: 1 }, ""); } catch (e) {}
+}
 function closeSheet() {
   if (!curSheet) return;
-  if (history.state && history.state.sheet) {               /* popstate -> hideSheet */
-    if (backPending) return;
-    backPending = true; history.back();
-  } else hideSheet();
+  hideSheet();
 }
-window.addEventListener("popstate", () => { backPending = false; if (curSheet) hideSheet(); else hidePanel(); });
+window.addEventListener("popstate", () => {
+  if (curSheet) hideSheet(); else if (panels.length) hidePanel(); else return;
+  if (curSheet || panels.length) ensureGuard();          /* encore quelque chose d'ouvert */
+});
 
 /* panneaux plein écran (organiser, aperçu, scanner), empilables */
 const panels = [];
 function openPanel(id) {
   const el = $("#" + id);
   if (panels.includes(el)) return;
-  try { history.pushState({ panel: 1 }, ""); } catch (e) {}
+  ensureGuard();
   panels.push(el);
   el.classList.add("on");
 }
@@ -235,8 +333,7 @@ function hidePanel() {
 }
 function closePanel() {
   if (!panels.length) return;
-  if (history.state && history.state.panel) { if (backPending) return; backPending = true; history.back(); }
-  else hidePanel();
+  hidePanel();
 }
 
 /* glisser la feuille vers le bas pour la fermer */
@@ -275,15 +372,34 @@ async function openBytes(bytes, name, opt) {
   opt = opt || {};
   if (!opt.force && S.items.length && !(await ask("Ouvrir un autre document ?",
       "Les annotations non enregistrées du document actuel seront perdues.", null))) return false;
+  /* PDF protégé : mot de passe, puis déchiffrement sur l'appareil */
+  let lock = null;
+  if (!opt.keepUndo) {
+    let E = null;
+    try { E = await Unlock.info(bytes); }
+    catch (e) { if (/certificat/.test(e && e.message)) { toast("Ce PDF est protégé par certificat : " + e.message + ".", 6000); return false; } }
+    if (E) {
+      lock = await unlockFlow(bytes, E, name || "document.pdf");
+      if (!lock) return false;
+      bytes = lock.bytes;
+    }
+  }
   busy(true, "Lecture du PDF…");
   try {
-    const doc = await pdfjsLib.getDocument({ data: bytes.slice(0), isEvalSupported: false }).promise;
+    const prevPwd = docPassword;
+    docPassword = lock && lock.readOnly ? lock.pwd : null;
+    let doc;
+    try { doc = await openPdf(bytes.slice(0)); } catch (e) { docPassword = prevPwd; throw e; }
     if (S.doc) { try { S.doc.destroy(); } catch (e) {} }
     S.doc = doc;
+    S.readOnly = !!(lock && lock.readOnly); S.perm = lock ? lock.P : -1;
+    if (!opt.keepUndo) S.wasLocked = !!lock;
+    document.body.classList.toggle("readonly", S.readOnly);
     S.bytes = bytes.slice(0);                      // copie intacte pour l'export
     S.name = name || "document.pdf";
     S.srcSize = bytes.length;
-    S.items = []; S.fields = []; S.values = {}; S.undo = []; S.redo = []; S.sel = null; S.cur = 0;
+    S.items = []; S.fields = []; S.values = {}; S.sel = null; S.cur = 0;
+    if (!opt.keepUndo) { S.undo = []; S.redo = []; }
     S.pending = null; setTool("select");
     S.wm = null;
     Search.reset();
@@ -301,12 +417,14 @@ async function openBytes(bytes, name, opt) {
     updateUndo();
     document.title = S.name + " — LeSacAPDF";
     $("#viewer").scrollTo(0, 0);
-    if (!opt.noRecent) Recents.addCurrent();
+    if (!opt.noRecent && !S.readOnly) Recents.addCurrent();
+    if (lock && lock.readOnly) toast("Ouvert en lecture seule : l'auteur de ce PDF en interdit la modification.", 6000);
+    else if (lock) toast("Document déverrouillé. Il sera enregistré sans mot de passe, sauf si vous cochez « Protéger par un mot de passe ».", 6500);
     return true;
   } catch (e) {
     console.error(e);
     const pw = e && e.name === "PasswordException";
-    toast(pw ? "Ce PDF est protégé par un mot de passe : il ne peut pas être modifié ici."
+    toast(pw ? "Mot de passe refusé : ce PDF n'a pas pu être ouvert."
              : "Impossible d'ouvrir ce PDF : " + (e && e.message ? e.message : e), 6000);
     return false;
   } finally { busy(false); }
@@ -315,8 +433,9 @@ async function openBytes(bytes, name, opt) {
 function updateSub() {
   if (!S.doc) return;
   const n = S.doc.numPages;
-  let t = n + " page" + (n > 1 ? "s" : "");
-  if (S.fields.length) t += " · formulaire (" + S.fields.length + " champ" + (S.fields.length > 1 ? "s" : "") + ")";
+  /* version en tête : la place est comptée quand un document est ouvert */
+  let t = "v" + APP_VERSION + " · " + n + " page" + (n > 1 ? "s" : "");
+  if (S.fields.length) t += " · " + S.fields.length + " champ" + (S.fields.length > 1 ? "s" : "");
   $("#docSub").textContent = t;
 }
 
@@ -477,7 +596,8 @@ async function readFormFields() {
     for (const a of annots) {
       if (a.subtype !== "Widget" || !a.fieldName) continue;
       if (a.fieldType === "Btn" && a.pushButton) continue;
-      const r = pdfjsLib.Util.normalizeRect(vp.convertToViewportRectangle(a.rect));
+      const q1 = vp.convertToViewportPoint(a.rect[0], a.rect[1]), q2 = vp.convertToViewportPoint(a.rect[2], a.rect[3]);
+      const r = [Math.min(q1[0], q2[0]), Math.min(q1[1], q2[1]), Math.max(q1[0], q2[0]), Math.max(q1[1], q2[1])];
       const f = {
         name: a.fieldName, type: a.fieldType, page: p.num - 1,
         x: r[0], y: r[1], w: r[2] - r[0], h: r[3] - r[1],
@@ -509,6 +629,7 @@ function renderFields() {
       el.checked = f.radio ? S.values[f.name] === f.exportValue
                            : (S.values[f.name] && S.values[f.name] !== "Off");
       el.onchange = () => {
+        snapshot();
         S.values[f.name] = el.checked ? (f.exportValue || "Yes") : "Off";
       };
     } else if (f.options && f.options.length) {
@@ -520,16 +641,19 @@ function renderFields() {
         el.appendChild(op);
       }
       el.value = S.values[f.name] || "";
-      el.onchange = () => S.values[f.name] = el.value;
+      el.onchange = () => { snapshot(); S.values[f.name] = el.value; };
     } else {
       el = document.createElement(f.multiline ? "textarea" : "input");
       if (!f.multiline) el.type = "text";
       el.value = S.values[f.name] || "";
-      el.oninput = () => S.values[f.name] = el.value;
+      /* texte : une étape par saisie (au premier caractère tapé dans le champ) */
+      el.onfocus = () => { el._snap = false; };
+      el.oninput = () => { if (!el._snap) { snapshot(); el._snap = true; } S.values[f.name] = el.value; };
       el.setAttribute("autocomplete", "off");
     }
     el.className = "field";
     el.title = f.name;
+    if (S.readOnly) el.disabled = true;
     el.style.left = (f.x * S.scale) + "px";
     el.style.top = (f.y * S.scale) + "px";
     if (f.check || f.radio) {
@@ -544,10 +668,20 @@ function renderFields() {
   }
 }
 
-/* ==================================================== annotations : modèle */
-function snapshot() {
-  S.undo.push(JSON.stringify(S.items));
-  if (S.undo.length > 60) S.undo.shift();
+/* ==================================================== annulation (version 4.6)
+   Chaque étape mémorise les annotations et les valeurs des champs ; les
+   opérations sur les pages (organiser, pivoter, reconnaître le texte)
+   mémorisent aussi le document et la rotation des pages.                    */
+const UNDO_MAX = 60, UNDO_DOCS = 8;
+function undoState(withDoc) {
+  const st = { items: JSON.stringify(S.items), values: JSON.stringify(S.values) };
+  if (withDoc) st.doc = { bytes: S.bytes, name: S.name, rots: S.pages.map(p => p.rot), wm: S.wm ? JSON.stringify(S.wm) : null };
+  return st;
+}
+function snapshot(withDoc) {
+  S.undo.push(undoState(withDoc));
+  /* limites : 60 étapes, dont 8 avec une copie du document (mémoire du téléphone) */
+  while (S.undo.length > UNDO_MAX || S.undo.filter(x => x.doc).length > UNDO_DOCS) S.undo.shift();
   S.redo.length = 0;
   updateUndo();
 }
@@ -555,18 +689,38 @@ function updateUndo() {
   $("#btnUndo").disabled = !S.undo.length;
   $("#btnRedo").disabled = !S.redo.length;
 }
-function undo() {
-  if (!S.undo.length) return;
-  S.redo.push(JSON.stringify(S.items));
-  S.items = JSON.parse(S.undo.pop());
-  S.sel = null; renderItems(); showProps(); updateUndo();
+let undoBusy = false;
+async function restoreState(st) {
+  if (st.doc) {
+    if (st.doc.bytes !== S.bytes) {
+      if (!(await openBytes(st.doc.bytes, st.doc.name, { force: true, noRecent: true, keepUndo: true }))) return false;
+    }
+    S.wm = st.doc.wm ? JSON.parse(st.doc.wm) : null;
+    let turned = false;
+    st.doc.rots.forEach((r, i) => {
+      const p = S.pages[i]; if (!p || p.rot === r) return;
+      p.rot = r; const vp = p.page.getViewport({ scale: 1, rotation: r }); p.dw = vp.width; p.dh = vp.height; turned = true;
+    });
+    if (turned) repaintAll();
+  }
+  S.items = JSON.parse(st.items);
+  S.values = JSON.parse(st.values);
+  S.sel = null; renderFields(); renderItems(); showProps();
+  if (st.doc) { render(); updatePill(); }
+  return true;
 }
-function redo() {
-  if (!S.redo.length) return;
-  S.undo.push(JSON.stringify(S.items));
-  S.items = JSON.parse(S.redo.pop());
-  S.sel = null; renderItems(); showProps(); updateUndo();
+async function stepHistory(from, to, label) {
+  if (!from.length || undoBusy) return;
+  undoBusy = true;
+  try {
+    const st = from.pop();
+    to.push(undoState(!!st.doc));
+    if (st.doc) busy(true, label);
+    if (!(await restoreState(st))) { to.pop(); from.push(st); }
+  } finally { undoBusy = false; busy(false); updateUndo(); }
 }
+function undo() { return stepHistory(S.undo, S.redo, "Annulation…"); }
+function redo() { return stepHistory(S.redo, S.undo, "Rétablissement…"); }
 
 function measure(it) {
   const c = measure._c || (measure._c = document.createElement("canvas").getContext("2d"));
@@ -1078,6 +1232,7 @@ const HINTS = {
   redact: "Tracez un rectangle sur ce qui doit disparaître définitivement"
 };
 function setTool(t, keepPending) {
+  if (t !== "select" && roBlock()) t = "select";
   if (!keepPending) S.pending = null;
   S.tool = t;
   if (t !== "select") S.sel = null;
@@ -1608,8 +1763,11 @@ async function buildVector(opt) {
 }
 
 /* ---------------------------------------------- allègement du document
-   Chaque page est rendue en image puis compressée en JPEG jusqu'à tenir
-   dans le budget qui lui revient. Les annotations restent vectorielles. */
+   Version 4.7 : seules les images du PDF sont recompressées (JPEG, taille
+   réduite par paliers) ; le texte, les polices et les tracés restent
+   intacts, donc nets et sélectionnables. En dernier recours seulement, si
+   la taille demandée reste hors d'atteinte, chaque page est rendue en image
+   (ancienne méthode, rasterSmall).                                          */
 const yieldChan = typeof MessageChannel === "function" ? new MessageChannel() : null;
 const yieldQ = [];
 if (yieldChan) yieldChan.port1.onmessage = () => { const f = yieldQ.shift(); if (f) f(); };
@@ -1660,13 +1818,132 @@ async function fitPage(src, tmp, budget, hint) {
 }
 
 async function buildSmall(targetBytes, gray) {
+  const plein = await buildVector();
+  if (!gray && plein.length <= targetBytes) return { bytes: plein, mode: "vector" };
+  let img = null;
+  try { img = await shrinkImages(plein, targetBytes, gray); }
+  catch (e) { console.warn("recompression des images impossible :", e); }
+  if (img && img.bytes.length <= targetBytes) return { bytes: img.bytes, mode: "images", info: img };
+  /* dernier recours : pages en images */
+  const ras = await rasterSmall(targetBytes, gray);
+  /* si même ainsi la limite n'est pas atteinte, on garde le texte net */
+  if (img && ras.bytes.length > targetBytes && img.bytes.length <= ras.bytes.length * 1.15) return { bytes: img.bytes, mode: "images", info: img };
+  return ras;
+}
+
+/* images d'un PDF : décodage (JPEG, ou pixels compressés 8 bits RVB / gris) */
+async function pdfImageBitmap(L, ctx, st) {
+  const d = st.dict, N = n => L.PDFName.of(n);
+  if (d.lookup(N("ImageMask")) || d.lookup(N("Decode"))) return null;
+  let f = d.lookup(N("Filter"));
+  if (f instanceof L.PDFArray) { if (f.size() !== 1) return null; f = f.lookup(0); }
+  const filter = f ? f.asString() : "";
+  let cs = d.lookup(N("ColorSpace")), comps = 0;
+  if (cs instanceof L.PDFName) comps = { "/DeviceRGB": 3, "/DeviceGray": 1, "/CalRGB": 3, "/CalGray": 1 }[cs.asString()] || 0;
+  else if (cs instanceof L.PDFArray) {
+    const fam = cs.lookup(0) && cs.lookup(0).asString();
+    if (fam === "/ICCBased") { const icc = cs.lookup(1); const n = icc && icc.dict ? icc.dict.lookup(N("N")) : null; comps = n ? n.asNumber() : 0; }
+    else if (fam === "/CalRGB") comps = 3; else if (fam === "/CalGray") comps = 1;
+  }
+  if (comps !== 1 && comps !== 3) return null;                          /* CMJN, palette… : inchangés */
+  if (filter === "/DCTDecode") {
+    return createImageBitmap(new Blob([st.contents], { type: "image/jpeg" }));
+  }
+  if (filter !== "/FlateDecode") return null;
+  const bpc = d.lookup(N("BitsPerComponent")), w = d.lookup(N("Width")), h = d.lookup(N("Height"));
+  if (!bpc || bpc.asNumber() !== 8 || !w || !h) return null;
+  const W = w.asNumber(), H = h.asNumber();
+  if (typeof DecompressionStream !== "function") return null;
+  const raw = new Uint8Array(await new Response(new Blob([st.contents]).stream().pipeThrough(new DecompressionStream("deflate"))).arrayBuffer());
+  let dp = d.lookup(N("DecodeParms")); if (dp instanceof L.PDFArray) dp = dp.lookup(0);
+  const pred = dp instanceof L.PDFDict && dp.lookup(N("Predictor")) ? dp.lookup(N("Predictor")).asNumber() : 1;
+  const row = W * comps;
+  let px;
+  if (pred >= 10) {                                                       /* prédicteurs PNG */
+    px = new Uint8Array(row * H);
+    for (let y = 0; y < H; y++) {
+      const ft = raw[y * (row + 1)], s0 = y * (row + 1) + 1, o = y * row;
+      for (let x = 0; x < row; x++) {
+        const a = x >= comps ? px[o + x - comps] : 0, b = y ? px[o - row + x] : 0, c = (x >= comps && y) ? px[o - row + x - comps] : 0;
+        let v = raw[s0 + x];
+        if (ft === 1) v += a; else if (ft === 2) v += b; else if (ft === 3) v += (a + b) >> 1;
+        else if (ft === 4) { const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c); v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c; }
+        px[o + x] = v & 255;
+      }
+    }
+  } else if (pred === 1) px = raw; else return null;
+  if (px.length < row * H) return null;
+  const id = new ImageData(W, H), o = id.data;
+  for (let i = 0, j = 0; i < W * H; i++, j += comps) {
+    o[i * 4] = px[j]; o[i * 4 + 1] = px[j + (comps === 3 ? 1 : 0)]; o[i * 4 + 2] = px[j + (comps === 3 ? 2 : 0)]; o[i * 4 + 3] = 255;
+  }
+  return createImageBitmap(id);
+}
+
+/* recompression des images seules, par paliers, jusqu'à la taille visée */
+async function shrinkImages(bytes, targetBytes, gray) {
+  const L = window.PDFLib, N = n => L.PDFName.of(n);
+  const doc = await L.PDFDocument.load(bytes, { updateMetadata: false });
+  const ctx = doc.context, list = [], masks = new Set();
+  for (const [ref, obj] of ctx.enumerateIndirectObjects()) {
+    if (!(obj instanceof L.PDFRawStream) || obj.dict.lookup(N("Subtype")) !== N("Image")) continue;
+    const sm = obj.dict.get(N("SMask")); if (sm instanceof L.PDFRef) masks.add(sm.toString());
+    list.push({ ref, obj });
+  }
+  /* images retenues : assez lourdes pour valoir la peine, hors masques de transparence */
+  const imgs = list.filter(x => !masks.has(x.ref.toString()) && x.obj.contents.length > 12000).map(x => ({ ...x, orig: x.obj }));
+  if (!imgs.length) return { bytes: await doc.save({ useObjectStreams: true }), count: 0, total: list.length };
+  const levels = [[0.82, 2600], [0.72, 2000], [0.62, 1600], [0.52, 1300], [0.45, 1050], [0.38, 850], [0.32, 680], [0.28, 540]];
+  const cv = document.createElement("canvas"), cx = cv.getContext("2d", { alpha: false });
+  let best = null;
+  for (let li = 0; li < levels.length; li++) {
+    const [q, max] = levels[li];
+    let changed = 0;
+    for (let k = 0; k < imgs.length; k++) {
+      const it = imgs[k];
+      busy(true, "Allègement des images — " + (k + 1) + " sur " + imgs.length + " (palier " + (li + 1) + ")…");
+      await yieldUI();
+      let bmp = null;
+      try { bmp = await pdfImageBitmap(L, ctx, it.orig); } catch (e) { bmp = null; }   /* toujours depuis l'original */
+      if (!bmp) continue;
+      const smk = it.orig.dict.lookup(N("SMask")), matte = smk && smk.dict && smk.dict.lookup(N("Matte"));
+      const s = matte ? 1 : Math.min(1, max / Math.max(bmp.width, bmp.height));
+      cv.width = Math.max(1, Math.round(bmp.width * s)); cv.height = Math.max(1, Math.round(bmp.height * s));
+      cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = "high";
+      cx.fillStyle = "#fff"; cx.fillRect(0, 0, cv.width, cv.height);
+      cx.drawImage(bmp, 0, 0, cv.width, cv.height);
+      if (bmp.close) bmp.close();
+      if (gray) toGray(cx, cv);
+      const blob = await new Promise(r => cv.toBlob(r, "image/jpeg", q));
+      const data = new Uint8Array(await blob.arrayBuffer());
+      /* on ne remplace que si l'image devient nettement plus légère */
+      if (data.length >= it.orig.contents.length * 0.9 && !gray) continue;
+      if (data.length >= it.obj.contents.length && it.obj !== it.orig) continue;
+      const nd = it.orig.dict.clone(ctx);
+      ["Filter", "DecodeParms", "Length", "BitsPerComponent", "ColorSpace", "Width", "Height", "Decode"].forEach(k2 => nd.delete(N(k2)));
+      nd.set(N("Width"), L.PDFNumber.of(cv.width)); nd.set(N("Height"), L.PDFNumber.of(cv.height));
+      nd.set(N("BitsPerComponent"), L.PDFNumber.of(8)); nd.set(N("ColorSpace"), N("DeviceRGB"));
+      nd.set(N("Filter"), N("DCTDecode"));
+      ctx.assign(it.ref, L.PDFRawStream.of(nd, data));
+      it.obj = ctx.lookup(it.ref);
+      changed++;
+    }
+    busy(true, "Allègement — vérification de la taille…");
+    const out = await doc.save({ useObjectStreams: true });
+    best = { bytes: out, count: imgs.length, total: list.length, level: li + 1, quality: q, maxSide: max };
+    if (out.length <= targetBytes || (!changed && li > 0)) break;
+  }
+  cv.width = cv.height = 1;
+  return best;
+}
+
+/* dernier recours : chaque page rendue en image (texte non sélectionnable) */
+async function rasterSmall(targetBytes, gray) {
   const L = window.PDFLib;
   let src = null;
   try {
-    const plein = await buildVector();
-    if (!gray && plein.length <= targetBytes) return { bytes: plein, mode: "vector" };
     const base = await buildVector({ skipItems: true });
-    src = await pdfjsLib.getDocument({ data: base, isEvalSupported: false }).promise;
+    src = await openPdf(base);
   } catch (e) { console.warn("base vectorielle indisponible, pages d'origine :", e); }
 
   const n = S.pages.length;
@@ -1713,7 +1990,7 @@ async function buildSmall(targetBytes, gray) {
   busy(true, "Finalisation du PDF…");
   await yieldUI();
   if (src) { try { await src.destroy(); } catch (e) {} }
-  return { bytes: await out.save(), mode: "small" };
+  return { bytes: await out.save(), mode: "raster" };
 }
 
 /* ------------------------------------------------ partage / enregistrement */
@@ -1749,12 +2026,14 @@ async function makePdf(mode, targetBytes, gray) {
     if (mode === "small") {
       const r = await buildSmall(targetBytes, gray);
       bytes = r.bytes;
-      note = r.mode === "vector" ? "Déjà sous la limite : qualité d'origine conservée." : "";
+      note = r.mode === "vector" ? "Déjà sous la limite : qualité d'origine conservée."
+        : r.mode === "images" ? (r.info && r.info.count ? "Images allégées, texte net et sélectionnable." : "Texte net conservé.")
+        : "Pages converties en images pour atteindre cette taille : texte non sélectionnable.";
     } else {
       bytes = await buildVector();
     }
     const trop = mode === "small" && bytes.length > targetBytes;
-    if (trop) note = "Limite non atteinte : essayez les niveaux de gris.";
+    if (trop) note = "Limite non atteinte (" + fmtMo(bytes.length) + ") : essayez les niveaux de gris ou une limite plus haute.";
     return { bytes, note };
   } finally {
     busy(false);
@@ -1810,9 +2089,13 @@ function syncSmall() {
 }
 
 /* ------------------------------------------- petite boîte de dialogue */
-function ask(title, sub, value) {
+function ask(title, sub, value, opts) {
+  opts = opts || {};
   return new Promise(res => {
     const sh = $("#shAsk"), inp = $("#askInput");
+    inp.type = opts.password ? "password" : "text";
+    inp.placeholder = opts.placeholder || "";
+    $("#askCancel").textContent = opts.cancel || "Annuler";
     $("#askTitle").textContent = title;
     $("#askSub").textContent = sub || "";
     $("#askSub").hidden = !sub;
@@ -1824,13 +2107,51 @@ function ask(title, sub, value) {
     sh._onclose = () => finish(null);
     openSheet("shAsk");
     if (value !== null) { inp.focus(); try { inp.select(); } catch (e) {} }
-    $("#askOk").onclick = () => { const v = value === null ? true : inp.value.trim(); finish(v); closeSheet(); };
+    $("#askOk").onclick = () => { const v = value === null ? true : opts.password ? inp.value : inp.value.trim(); finish(v); closeSheet(); };
     $("#askCancel").onclick = () => closeSheet();
     inp.onkeydown = e => {
       e.stopPropagation();
       if (e.key === "Enter") { e.preventDefault(); $("#askOk").click(); }
     };
   });
+}
+
+/* --- déverrouillage d'un PDF protégé : { bytes, readOnly, pwd, P } ou null (abandon) */
+async function unlockFlow(bytes, E, name) {
+  if (!window.crypto || !crypto.subtle) { toast("Déverrouillage impossible : connexion non sécurisée (https requis).", 6000); return null; }
+  let pw = "", k = await Unlock.key(E, ""), wrong = false;
+  while (!k) {
+    pw = await ask("Document protégé", (wrong ? "Mot de passe incorrect. " : "") + "Saisissez le mot de passe de « " + name +
+      " ». Il reste sur ce téléphone.", "", { password: true, placeholder: "Mot de passe" });
+    if (pw === null) return null;
+    busy(true, "Vérification du mot de passe…");
+    try { k = await Unlock.key(E, pw); } finally { busy(false); }
+    wrong = !k;
+  }
+  /* l'auteur interdit la modification : mot de passe propriétaire, sinon lecture seule */
+  if (!k.owner && !Unlock.canEdit(E)) {
+    wrong = false;
+    for (;;) {
+      const po = await ask("Modification interdite par l'auteur", (wrong ? "Mot de passe propriétaire incorrect. " : "") +
+        "Ce PDF peut être lu, mais son auteur en interdit la modification. Saisissez le mot de passe propriétaire pour le modifier.",
+        "", { password: true, cancel: "Lire seulement", placeholder: "Mot de passe propriétaire" });
+      if (po === null) return { bytes, readOnly: true, pwd: pw, P: E.P };
+      busy(true, "Vérification du mot de passe…");
+      let k2; try { k2 = await Unlock.key(E, po); } finally { busy(false); }
+      if (k2 && k2.owner) { k = k2; break; }
+      wrong = true;
+    }
+  }
+  busy(true, "Déverrouillage du document…");
+  try { return { bytes: new Uint8Array(await Unlock.decrypt(bytes, E, k.key)), readOnly: false, P: E.P }; }
+  catch (e) { console.error(e); toast("Déverrouillage impossible : " + (e && e.message ? e.message : e), 6000); return null; }
+  finally { busy(false); }
+}
+/* document en lecture seule : toute modification est refusée */
+function roBlock() {
+  if (!S.readOnly) return false;
+  toast("Lecture seule : l'auteur de ce PDF en interdit la modification (mot de passe propriétaire requis).", 4500);
+  return true;
 }
 
 /* --------------------------------------------------- installation (PWA) */
@@ -2146,6 +2467,8 @@ const Recents = {
   },
   /* document courant : miniature de la 1re page */
   async addCurrent() {
+    /* un document déverrouillé n'est pas conservé en clair dans les récents */
+    if (S.wasLocked) return;
     let thumb = "";
     try {
       const p = S.pages[0];
@@ -2202,7 +2525,7 @@ async function printDoc() {
   try {
     clearPrint();
     const bytes = await buildVector();
-    doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+    doc = await openPdf(bytes);
     const area = $("#printArea"), cv = document.createElement("canvas"), cx = cv.getContext("2d", { alpha: false });
     const dpi = isIOS ? 130 : 150;
     for (let i = 1; i <= doc.numPages; i++) {
@@ -2235,7 +2558,7 @@ async function printDoc() {
 /* ------------------------------------------- résultat d'une opération (PDF créé) */
 function showResult(bytes, name, info) {
   S.out = { bytes, name };
-  Recents.add(bytes, name);
+  if (!S.wasLocked) Recents.add(bytes, name);
   $("#doneName").textContent = name;
   $("#doneInfo").textContent = (info ? info + " · " : "") + fmtMo(bytes.length);
   $("#saveForm").hidden = true; $("#saveDone").hidden = false;
@@ -2279,7 +2602,7 @@ const Org = {
 
   async addSource(bytes, name, isCurrent) {
     const id = "s" + (Org.n++);
-    const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0), isEvalSupported: false }).promise;
+    const pdf = await openPdf(bytes.slice(0));
     const src = { id, name, bytes: bytes.slice(0), pdf, color: SRC_COLORS[Org.order.length % SRC_COLORS.length],
                   letter: String.fromCharCode(65 + Org.order.length), current: !!isCurrent, rot: [] };
     for (let i = 1; i <= pdf.numPages; i++) {
@@ -2456,8 +2779,9 @@ const Org = {
         if (!bytes) return;
         const name = S.name;
         closePanel();
-        await openBytes(bytes, name, { force: true });
-        toast("Document mis à jour.");
+        snapshot(true);
+        if (await openBytes(bytes, name, { force: true, keepUndo: true })) toast("Document mis à jour. « Annuler » revient à l'état précédent.", 3500);
+        else { S.undo.pop(); updateUndo(); }
         break;
       }
     }
@@ -2613,6 +2937,7 @@ const Scan = {
       $("#pnScan")._onclose = () => { Scan.pages = []; Scan.cur = -1; };
     }
     Scan.cur = first;
+    $("#scOcr").checked = PREF.scanOcr !== false;
     Scan.showCrop();
   },
 
@@ -2730,25 +3055,40 @@ const Scan = {
   },
 
   async finish() {
+    /* confirmation demandée tant que le scanner est ouvert (sinon sa fermeture la ferait disparaître) */
+    if (S.items.length && !(await ask("Ouvrir le scan ?",
+        "Les annotations non enregistrées du document actuel seront perdues.", null))) return;
     busy(true, "Création du PDF…");
     try {
       for (const p of Scan.pages) if (!p.out) await Scan.process(p);
       const L = window.PDFLib, doc = await L.PDFDocument.create();
-      for (const p of Scan.pages) {
+      const ocr = $("#scOcr").checked;
+      PREF.scanOcr = ocr; Prof.savePref();
+      let words = 0;
+      for (let i = 0; i < Scan.pages.length; i++) {
+        const p = Scan.pages[i];
         const blob = await new Promise(r => p.out.toBlob(r, "image/jpeg", 0.82));
         const img = await doc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
-        const W = 595.28, H = W * p.out.height / p.out.width;
-        doc.addPage([W, H]).drawImage(img, { x: 0, y: 0, width: W, height: H });
+        const W = 595.28, H = W * p.out.height / p.out.width, page = doc.addPage([W, H]);
+        page.drawImage(img, { x: 0, y: 0, width: W, height: H });
+        if (ocr) {
+          OCR.progress("Reconnaissance du texte — page " + (i + 1) + " sur " + Scan.pages.length);
+          const lines = await ocrImage(p.out), cw = p.out.width, ch = p.out.height;
+          words += await Ink.add(doc, page, lines, (x, y) => [x * W / cw, H - y * H / ch]);
+        }
       }
+      if (ocr) { await OCR.done(); OCR.onLog = null; }
       doc.setTitle("Scan"); doc.setCreator("LeSacAPDF");
       const bytes = await doc.save();
       const d = new Date();
       const name = "Scan " + fmtDate(d).replace(/\//g, "-") + " " + fmtTime(d) + ".pdf";
       busy(false);
       closePanel();
-      await openBytes(bytes, name);
+      if (!(await openBytes(bytes, name, { force: true }))) return;
+      if (ocr) toast(words ? "Texte reconnu : " + words + " mots, sélectionnables et cherchables." :
+        "Aucun texte reconnu sur ce scan.", 4000);
     } catch (e) {
-      console.error(e); busy(false); toast("Échec : " + e.message, 5000);
+      console.error(e); OCR.done(); OCR.onLog = null; busy(false); toast("Échec : " + e.message, 5000);
     }
   }
 };
@@ -2975,7 +3315,7 @@ function zipStore(entries) {
 
 /* --- rendu des pages du PDF annoté en images */
 async function renderPages(bytes, dpi, type, onPage) {
-  const doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+  const doc = await openPdf(bytes);
   const out = [], cv = document.createElement("canvas"), cx = cv.getContext("2d", { alpha: false });
   const cap = isIOS ? 9e6 : 16e6;
   try {
@@ -3000,7 +3340,7 @@ async function renderPages(bytes, dpi, type, onPage) {
 
 /* --- extraction du texte : lignes puis paragraphes, page par page */
 async function extractText(bytes) {
-  const doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+  const doc = await openPdf(bytes);
   const pages = [];
   try {
     for (let i = 1; i <= doc.numPages; i++) {
@@ -3379,7 +3719,7 @@ async function burnRedactions(bytes) {
   const pagesIdx = [...new Set(S.items.filter(it => it.type === "redact").map(it => it.page))].sort((a, b) => a - b);
   if (!pagesIdx.length) return bytes;
   const L = window.PDFLib;
-  const src = await pdfjsLib.getDocument({ data: bytes.slice(0), isEvalSupported: false }).promise;
+  const src = await openPdf(bytes.slice(0));
   const doc = await L.PDFDocument.load(bytes, { updateMetadata: false });
   const cv = document.createElement("canvas"), cx = cv.getContext("2d", { alpha: false });
   try {
@@ -3494,6 +3834,212 @@ async function encryptPdf(bytes, password) {
   return doc.save({ useObjectStreams: false, addDefaultPage: false, updateFieldAppearances: false });
 }
 
+/* =====================================================================
+   VERSION 4.6 — ouverture des PDF protégés par mot de passe.
+   Gestionnaire de sécurité standard (ISO 32000-2, 7.6.4) : RC4 40 à 128 bits
+   (révisions 2 à 4), AES-128 (révision 4), AES-256 (révisions 5 et 6).
+   Le mot de passe est vérifié puis le document est déchiffré en mémoire,
+   sur l'appareil, pour être modifié comme un PDF ordinaire.
+   ===================================================================== */
+/* MD5 (RFC 1321) : nécessaire aux révisions 2 à 4, absent de WebCrypto */
+const md5 = (() => {
+  const K = new Uint32Array(64), R = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
+  for (let i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296) >>> 0;
+  return d => {
+    const n = d.length, len = ((n + 8) >>> 6 << 6) + 64, m = new Uint8Array(len);
+    m.set(d); m[n] = 0x80;
+    const dv = new DataView(m.buffer);
+    dv.setUint32(len - 8, (n * 8) >>> 0, true); dv.setUint32(len - 4, Math.floor(n / 536870912), true);
+    let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+    const W = new Uint32Array(16);
+    for (let o = 0; o < len; o += 64) {
+      for (let i = 0; i < 16; i++) W[i] = dv.getUint32(o + i * 4, true);
+      let A = a0, B = b0, C = c0, D = d0;
+      for (let i = 0; i < 64; i++) {
+        let F, g;
+        if (i < 16) { F = (B & C) | (~B & D); g = i; }
+        else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) & 15; }
+        else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) & 15; }
+        else { F = C ^ (B | ~D); g = (7 * i) & 15; }
+        const t = D; D = C; C = B;
+        const x = (A + F + K[i] + W[g]) >>> 0, r = R[(i >> 4) * 4 + (i & 3)];
+        B = (B + ((x << r) | (x >>> (32 - r)))) >>> 0; A = t;
+      }
+      a0 = (a0 + A) >>> 0; b0 = (b0 + B) >>> 0; c0 = (c0 + C) >>> 0; d0 = (d0 + D) >>> 0;
+    }
+    const out = new Uint8Array(16), ov = new DataView(out.buffer);
+    [a0, b0, c0, d0].forEach((v, i) => ov.setUint32(i * 4, v, true));
+    return out;
+  };
+})();
+function rc4(key, data) {
+  const S = new Uint8Array(256); for (let i = 0; i < 256; i++) S[i] = i;
+  for (let i = 0, j = 0; i < 256; i++) { j = (j + S[i] + key[i % key.length]) & 255; const t = S[i]; S[i] = S[j]; S[j] = t; }
+  const out = new Uint8Array(data.length);
+  for (let k = 0, i = 0, j = 0; k < data.length; k++) {
+    i = (i + 1) & 255; j = (j + S[i]) & 255; const t = S[i]; S[i] = S[j]; S[j] = t;
+    out[k] = data[k] ^ S[(S[i] + S[j]) & 255];
+  }
+  return out;
+}
+/* AES-CBC sans contrôle du remplissage : WebCrypto l'exige, on ajoute donc un
+   bloc de remplissage valide calculé, puis on le retire. */
+async function aesDecRaw(key, iv, data) {
+  if (!data.length || data.length % 16) data = data.slice(0, data.length - data.length % 16);
+  if (!data.length) return new Uint8Array(0);
+  const last = data.slice(data.length - 16), pad = new Uint8Array(16).fill(16);
+  for (let i = 0; i < 16; i++) pad[i] ^= last[i];
+  const extra = (await Crypt.aesCbc(key, new Uint8Array(16), pad, true));
+  const k = await crypto.subtle.importKey("raw", key, "AES-CBC", false, ["decrypt"]);
+  const out = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-CBC", iv }, k, Crypt.cat(data, extra)));
+  return out;   /* le bloc ajouté est déjà retiré par WebCrypto */
+}
+const unpad = d => { const n = d[d.length - 1]; return n >= 1 && n <= 16 && n <= d.length && d.slice(d.length - n).every(x => x === n) ? d.slice(0, d.length - n) : d; };
+const PDF_PAD = Uint8Array.from([0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41, 0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01, 0x08,
+  0x2E, 0x2E, 0x00, 0xB6, 0xD0, 0x68, 0x3E, 0x80, 0x2F, 0x0C, 0xA9, 0xFE, 0x64, 0x53, 0x69, 0x7A]);
+const sameBytes = (a, b, n) => { for (let i = 0; i < n; i++) if (a[i] !== b[i]) return false; return true; };
+
+const Unlock = {
+  /* analyse sans décoder : un objet par objet, avec traitement des flux à la volée */
+  parser(bytes, onObj) {
+    const L = window.PDFLib, p = L.PDFParser.forBytesWithOptions(bytes, 200, false);
+    const ENDOBJ = Array.from("endobj", c => c.charCodeAt(0)), T = L.PDFName.of("Type");
+    p.parseIndirectObject = async function () {
+      const ref = this.parseIndirectObjectHeader();
+      this.skipWhitespaceAndComments();
+      let obj = this.parseObject();
+      this.skipWhitespaceAndComments();
+      this.matchKeyword(ENDOBJ);
+      const type = obj instanceof L.PDFRawStream ? obj.dict.lookup(T) : null;
+      if (type === L.PDFName.of("XRef")) { L.PDFXRefStreamParser.forStream(obj).parseIntoContext(); return ref; }
+      if (onObj) obj = await onObj(ref, obj, type);
+      if (onObj && type === L.PDFName.of("ObjStm")) { await L.PDFObjectStreamParser.forStream(obj, this.shouldWaitForTick).parseIntoContext(); return ref; }
+      this.context.assign(ref, obj);
+      return ref;
+    };
+    return p;
+  },
+  /* paramètres de chiffrement, ou null si le document n'est pas chiffré */
+  async info(bytes) {
+    const L = window.PDFLib;
+    const ctx = await Unlock.parser(bytes, null).parseDocument();
+    const ref = ctx.trailerInfo.Encrypt;
+    if (!ref) return null;
+    const E = ctx.lookup(ref);
+    if (!(E instanceof L.PDFDict)) return null;
+    const g = k => E.lookup(L.PDFName.of(k)), num = (k, d) => { const v = g(k); return v instanceof L.PDFNumber ? v.asNumber() : d; };
+    const str = k => { const v = g(k); return v && v.asBytes ? v.asBytes() : new Uint8Array(0); };
+    const filter = g("Filter");
+    if (filter && filter.asString() !== "/Standard") throw new Error("protection « " + filter.asString().slice(1) + " » non prise en charge (certificat)");
+    const V = num("V", 0), R = num("R", 2);
+    let id0 = new Uint8Array(0);
+    const ID = ctx.trailerInfo.ID ? ctx.lookup(ctx.trailerInfo.ID) : null;
+    if (ID instanceof L.PDFArray && ID.size()) { const x = ID.lookup(0); if (x && x.asBytes) id0 = x.asBytes(); }
+    /* méthode par filtre de chiffrement (V4 et V5) */
+    const cfm = name => {
+      if (V < 4) return "rc4";
+      if (!name || name === "/Identity") return "none";
+      const CF = g("CF"), cf = CF instanceof L.PDFDict ? CF.lookup(L.PDFName.of(name.slice(1))) : null;
+      const m = cf instanceof L.PDFDict && cf.lookup(L.PDFName.of("CFM")) ? cf.lookup(L.PDFName.of("CFM")).asString() : "/None";
+      return { "/V2": "rc4", "/AESV2": "aes128", "/AESV3": "aes256" }[m] || "none";
+    };
+    const nm = k => { const v = g(k); return v instanceof L.PDFName ? v.asString() : null; };
+    const em = g("EncryptMetadata");
+    return { ref, V, R, P: num("P", -1) | 0, n: V === 1 ? 5 : Math.max(5, Math.min(16, num("Length", 40) / 8)),
+      O: str("O"), U: str("U"), OE: str("OE"), UE: str("UE"), id0,
+      encMeta: !(em instanceof L.PDFBool) || em.asBoolean(),
+      stm: cfm(nm("StmF") || "/Identity"), str: cfm(nm("StrF") || "/Identity") };
+  },
+  /* clé de chiffrement si le mot de passe est bon : { key, owner } ; sinon null */
+  async key(E, password) {
+    if (E.R >= 5) {
+      const pw = new TextEncoder().encode((password || "").normalize("NFKC")).slice(0, 127);
+      const H = E.R === 5 ? (p, salt, u) => Crypt.sha("SHA-256", Crypt.cat(p, salt, u)) : (p, salt, u) => Crypt.hash(p, salt, u);
+      const U48 = E.U.slice(0, 48), O = E.O, U = E.U;
+      if (sameBytes(await H(pw, O.slice(32, 40), U48), O, 32))
+        return { key: await aesDecRaw(await H(pw, O.slice(40, 48), U48), new Uint8Array(16), E.OE.slice(0, 32)), owner: true };
+      if (sameBytes(await H(pw, U.slice(32, 40), new Uint8Array(0)), U, 32))
+        return { key: await aesDecRaw(await H(pw, U.slice(40, 48), new Uint8Array(0)), new Uint8Array(16), E.UE.slice(0, 32)), owner: false };
+      return null;
+    }
+    const latin = s => Uint8Array.from(Array.from(s || ""), c => { const x = c.codePointAt(0); return x < 256 ? x : 63; }).slice(0, 32);
+    const padded = pw => Crypt.cat(pw, PDF_PAD).slice(0, 32);
+    /* algorithme 2 : clé à partir du mot de passe utilisateur (complété) */
+    const fileKey = pp => {
+      const P4 = new Uint8Array(4); new DataView(P4.buffer).setInt32(0, E.P, true);
+      let k = md5(Crypt.cat(pp, E.O.slice(0, 32), P4, E.id0, E.R >= 4 && !E.encMeta ? new Uint8Array([255, 255, 255, 255]) : new Uint8Array(0)));
+      if (E.R >= 3) for (let i = 0; i < 50; i++) k = md5(k.slice(0, E.n));
+      return k.slice(0, E.n);
+    };
+    /* algorithmes 4 et 5 : contrôle de U */
+    const userOk = k => {
+      if (E.R === 2) return sameBytes(rc4(k, PDF_PAD), E.U, 32);
+      let x = rc4(k, md5(Crypt.cat(PDF_PAD, E.id0)));
+      for (let i = 1; i <= 19; i++) x = rc4(k.map(b => b ^ i), x);
+      return sameBytes(x, E.U, 16);
+    };
+    /* algorithme 7 : mot de passe propriétaire -> mot de passe utilisateur */
+    let ok = fileKey(padded(latin(password)));
+    if (userOk(ok)) {
+      /* le mot de passe utilisateur peut aussi être celui du propriétaire : on le vérifie */
+      return { key: ok, owner: await Unlock.isOwner(E, latin(password), padded, fileKey, userOk) };
+    }
+    if (await Unlock.isOwner(E, latin(password), padded, fileKey, userOk)) {
+      return { key: Unlock._ownerKey, owner: true };
+    }
+    return null;
+  },
+  async isOwner(E, pw, padded, fileKey, userOk) {
+    let k = md5(padded(pw));
+    if (E.R >= 3) for (let i = 0; i < 50; i++) k = md5(k);
+    k = k.slice(0, E.n);
+    let x = E.O.slice(0, 32);
+    if (E.R === 2) x = rc4(k, x);
+    else for (let i = 19; i >= 0; i--) x = rc4(k.map(b => b ^ i), x);
+    const fk = fileKey(x);
+    if (userOk(fk)) { Unlock._ownerKey = fk; return true; }
+    return false;
+  },
+  /* droits accordés sans le mot de passe propriétaire (bits 4 : modifier, 6 : annoter) */
+  canEdit: E => (E.P & 8) !== 0 || (E.P & 32) !== 0,
+  /* document déchiffré, prêt pour pdf.js et pdf-lib */
+  async decrypt(bytes, E, key) {
+    const L = window.PDFLib;
+    const objKey = (ref, aes) => {
+      if (E.R >= 5) return key;
+      const n = ref.objectNumber, g = ref.generationNumber;
+      return md5(Crypt.cat(key, Uint8Array.from([n & 255, (n >> 8) & 255, (n >> 16) & 255, g & 255, (g >> 8) & 255]),
+        aes ? Uint8Array.from([0x73, 0x41, 0x6C, 0x54]) : new Uint8Array(0))).slice(0, Math.min(E.n + 5, 16));
+    };
+    const dec = async (ref, how, data) => {
+      if (how === "none") return data;
+      if (how === "rc4") return rc4(objKey(ref, false), data);
+      if (data.length < 32) return new Uint8Array(0);
+      return unpad(await aesDecRaw(objKey(ref, true), data.slice(0, 16), data.slice(16)));
+    };
+    const decStrings = async (ref, o) => {
+      if (o instanceof L.PDFString || o instanceof L.PDFHexString) return L.PDFHexString.of(Crypt.hex(await dec(ref, E.str, o.asBytes())));
+      if (o instanceof L.PDFDict) { for (const [k, v] of o.entries()) o.set(k, await decStrings(ref, v)); return o; }
+      if (o instanceof L.PDFArray) { for (let i = 0; i < o.size(); i++) o.set(i, await decStrings(ref, o.get(i))); return o; }
+      return o;
+    };
+    const encNum = E.ref.objectNumber, META = L.PDFName.of("Metadata");
+    const parser = Unlock.parser(bytes, async (ref, obj, type) => {
+      if (ref.objectNumber === encNum) return obj;                       /* dictionnaire de chiffrement */
+      if (obj instanceof L.PDFRawStream) {
+        await decStrings(ref, obj.dict);
+        if (type === META && !E.encMeta) return obj;
+        return L.PDFRawStream.of(obj.dict, await dec(ref, E.stm, obj.contents));
+      }
+      return decStrings(ref, obj);
+    });
+    const ctx = await parser.parseDocument();
+    ctx.delete(E.ref);
+    delete ctx.trailerInfo.Encrypt;
+    return L.PDFWriter.forContext(ctx, 200).serializeToBuffer();
+  }
+};
+
 /* ===================================================== PDF/A-2b, 2u et 2a
    2b : image fidèle de chaque page, profil sRGB, métadonnées XMP.
    2u : + couche de texte invisible, en Unicode, police Liberation Sans
@@ -3503,7 +4049,7 @@ async function encryptPdf(bytes, password) {
 const SRGB_ICC_B64 = "AAAJ3GxjbXMCEAAAbW50clJHQiBYWVogAAAAAAAAAAAAAAAAYWNzcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPbWAAEAAAAA0y0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJZGVzYwAAAPAAAABsY3BydAAAAVwAAAAkd3RwdAAAAYAAAAAUclhZWgAAAZQAAAAUZ1hZWgAAAagAAAAUYlhZWgAAAbwAAAAUclRSQwAAAdAAAAgMZ1RSQwAAAdAAAAgMYlRSQwAAAdAAAAgMZGVzYwAAAAAAAAASc1JHQiBJRUM2MTk2Ni0yLjEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAdGV4dAAAAABObyBjb3B5cmlnaHQsIHVzZSBmcmVlbHkAAAAAWFlaIAAAAAAAAPbWAAEAAAAA0y1YWVogAAAAAAAAb6QAADj2AAADj1hZWiAAAAAAAABilgAAt4cAABjcWFlaIAAAAAAAACSiAAAPgwAAts9jdXJ2AAAAAAAABAAAAAAFAAoADwAUABkAHgAjACgALQAyADcAOwBAAEUASgBPAFQAWQBeAGMAaABtAHIAdwB8AIEAhgCLAJAAlQCaAJ8ApACpAK4AsgC3ALwAwQDGAMsA0ADVANsA4ADlAOsA8AD2APsBAQEHAQ0BEwEZAR8BJQErATIBOAE+AUUBTAFSAVkBYAFnAW4BdQF8AYMBiwGSAZoBoQGpAbEBuQHBAckB0QHZAeEB6QHyAfoCAwIMAhQCHQImAi8COAJBAksCVAJdAmcCcQJ6AoQCjgKYAqICrAK2AsECywLVAuAC6wL1AwADCwMWAyEDLQM4A0MDTwNaA2YDcgN+A4oDlgOiA64DugPHA9MD4APsA/kEBgQTBCAELQQ7BEgEVQRjBHEEfgSMBJoEqAS2BMQE0wThBPAE/gUNBRwFKwU6BUkFWAVnBXcFhgWWBaYFtQXFBdUF5QX2BgYGFgYnBjcGSAZZBmoGewaMBp0GrwbABtEG4wb1BwcHGQcrBz0HTwdhB3QHhgeZB6wHvwfSB+UH+AgLCB8IMghGCFoIbgiCCJYIqgi+CNII5wj7CRAJJQk6CU8JZAl5CY8JpAm6Cc8J5Qn7ChEKJwo9ClQKagqBCpgKrgrFCtwK8wsLCyILOQtRC2kLgAuYC7ALyAvhC/kMEgwqDEMMXAx1DI4MpwzADNkM8w0NDSYNQA1aDXQNjg2pDcMN3g34DhMOLg5JDmQOfw6bDrYO0g7uDwkPJQ9BD14Peg+WD7MPzw/sEAkQJhBDEGEQfhCbELkQ1xD1ERMRMRFPEW0RjBGqEckR6BIHEiYSRRJkEoQSoxLDEuMTAxMjE0MTYxODE6QTxRPlFAYUJxRJFGoUixStFM4U8BUSFTQVVhV4FZsVvRXgFgMWJhZJFmwWjxayFtYW+hcdF0EXZReJF64X0hf3GBsYQBhlGIoYrxjVGPoZIBlFGWsZkRm3Gd0aBBoqGlEadxqeGsUa7BsUGzsbYxuKG7Ib2hwCHCocUhx7HKMczBz1HR4dRx1wHZkdwx3sHhYeQB5qHpQevh7pHxMfPh9pH5Qfvx/qIBUgQSBsIJggxCDwIRwhSCF1IaEhziH7IiciVSKCIq8i3SMKIzgjZiOUI8Ij8CQfJE0kfCSrJNolCSU4JWgllyXHJfcmJyZXJocmtyboJxgnSSd6J6sn3CgNKD8ocSiiKNQpBik4KWspnSnQKgIqNSpoKpsqzysCKzYraSudK9EsBSw5LG4soizXLQwtQS12Last4S4WLkwugi63Lu4vJC9aL5Evxy/+MDUwbDCkMNsxEjFKMYIxujHyMioyYzKbMtQzDTNGM38zuDPxNCs0ZTSeNNg1EzVNNYc1wjX9Njc2cjauNuk3JDdgN5w31zgUOFA4jDjIOQU5Qjl/Obw5+To2OnQ6sjrvOy07azuqO+g8JzxlPKQ84z0iPWE9oT3gPiA+YD6gPuA/IT9hP6I/4kAjQGRApkDnQSlBakGsQe5CMEJyQrVC90M6Q31DwEQDREdEikTORRJFVUWaRd5GIkZnRqtG8Ec1R3tHwEgFSEtIkUjXSR1JY0mpSfBKN0p9SsRLDEtTS5pL4kwqTHJMuk0CTUpNk03cTiVObk63TwBPSU+TT91QJ1BxULtRBlFQUZtR5lIxUnxSx1MTU19TqlP2VEJUj1TbVShVdVXCVg9WXFapVvdXRFeSV+BYL1h9WMtZGllpWbhaB1pWWqZa9VtFW5Vb5Vw1XIZc1l0nXXhdyV4aXmxevV8PX2Ffs2AFYFdgqmD8YU9homH1YklinGLwY0Njl2PrZEBklGTpZT1lkmXnZj1mkmboZz1nk2fpaD9olmjsaUNpmmnxakhqn2r3a09rp2v/bFdsr20IbWBtuW4SbmtuxG8eb3hv0XArcIZw4HE6cZVx8HJLcqZzAXNdc7h0FHRwdMx1KHWFdeF2Pnabdvh3VnezeBF4bnjMeSp5iXnnekZ6pXsEe2N7wnwhfIF84X1BfaF+AX5ifsJ/I3+Ef+WAR4CogQqBa4HNgjCCkoL0g1eDuoQdhICE44VHhauGDoZyhteHO4efiASIaYjOiTOJmYn+imSKyoswi5aL/IxjjMqNMY2Yjf+OZo7OjzaPnpAGkG6Q1pE/kaiSEZJ6kuOTTZO2lCCUipT0lV+VyZY0lp+XCpd1l+CYTJi4mSSZkJn8mmia1ZtCm6+cHJyJnPedZJ3SnkCerp8dn4uf+qBpoNihR6G2oiailqMGo3aj5qRWpMelOKWpphqmi6b9p26n4KhSqMSpN6mpqhyqj6sCq3Wr6axcrNCtRK24ri2uoa8Wr4uwALB1sOqxYLHWskuywrM4s660JbSctRO1irYBtnm28Ldot+C4WbjRuUq5wro7urW7LrunvCG8m70VvY++Cr6Evv+/er/1wHDA7MFnwePCX8Lbw1jD1MRRxM7FS8XIxkbGw8dBx7/IPci8yTrJuco4yrfLNsu2zDXMtc01zbXONs62zzfPuNA50LrRPNG+0j/SwdNE08bUSdTL1U7V0dZV1tjXXNfg2GTY6Nls2fHadtr724DcBdyK3RDdlt4c3qLfKd+v4DbgveFE4cziU+Lb42Pj6+Rz5PzlhOYN5pbnH+ep6DLovOlG6dDqW+rl63Dr++yG7RHtnO4o7rTvQO/M8Fjw5fFy8f/yjPMZ86f0NPTC9VD13vZt9vv3ivgZ+Kj5OPnH+lf65/t3/Af8mP0p/br+S/7c/23//w==";
 /* couche de texte : lignes regroupées en paragraphes, matrices en coordonnées de sortie */
 async function textLayer(bytes) {
-  const doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+  const doc = await openPdf(bytes);
   const pages = [];
   try {
     for (let i = 1; i <= doc.numPages; i++) {
@@ -3719,7 +4265,7 @@ async function buildPptx(bytes, title, mode) {
    Une feuille par page ; chaque ligne de texte devient une ligne du tableur,
    découpée en colonnes selon l'alignement horizontal du texte. */
 async function extractCells(bytes) {
-  const doc = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+  const doc = await openPdf(bytes);
   const sheets = [];
   try {
     for (let i = 1; i <= doc.numPages; i++) {
@@ -3904,7 +4450,8 @@ async function renderHtmlPages(bodyHtml, css, opts) {
     const scale = Math.min(2, Math.sqrt((isIOS ? 9e6 : 16e6) / (pxW * fullH)) || 1);
     const canvas = await window.html2canvas(d.documentElement, { scale: Math.max(0.5, scale), backgroundColor: "#ffffff",
       width: pxW, height: fullH, windowWidth: pxW, windowHeight: fullH, logging: false, useCORS: true });
-    if (opts.raw) return [canvas];
+    const words = domWords(d);                                   /* texte sélectionnable */
+    if (opts.raw) { canvas.lines = groupLines(words.map(w => scaleWord(w, canvas.width / pxW, 0))); return [canvas]; }
     /* découpage en pages : on coupe de préférence sur une ligne blanche */
     const k = canvas.width / pxW, pageH = Math.round(pxH * k), out = [];
     const cx = canvas.getContext("2d");
@@ -3920,6 +4467,7 @@ async function renderHtmlPages(bodyHtml, css, opts) {
         }
       }
       const pc = document.createElement("canvas"); pc.width = canvas.width; pc.height = pageH;
+      pc.lines = groupLines(words.filter(w => { const c = (w.y0 + w.y1) / 2 * k; return c >= y && c < cut; }).map(w => scaleWord(w, k, y)));
       const pcx = pc.getContext("2d"); pcx.fillStyle = "#fff"; pcx.fillRect(0, 0, pc.width, pc.height);
       pcx.drawImage(canvas, 0, y, canvas.width, cut - y, 0, 0, canvas.width, cut - y);
       out.push(pc);
@@ -3932,10 +4480,237 @@ async function canvasesToPdf(doc, canvases, w, h) {
   for (const c of canvases) {
     const blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.9));
     const img = await doc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
-    const W = w || A4.w, H = h || A4.h;
-    doc.addPage([W, H]).drawImage(img, { x: 0, y: 0, width: W, height: H });
+    const W = w || A4.w, H = h || A4.h, cw = c.width, ch = c.height;
+    const page = doc.addPage([W, H]);
+    page.drawImage(img, { x: 0, y: 0, width: W, height: H });
+    if (c.lines && c.lines.length) await Ink.add(doc, page, c.lines, (x, y) => [x * W / cw, H - y * H / ch]);
     c.width = c.height = 1;
   }
+}
+
+/* =====================================================================
+   VERSION 4.5 — texte sélectionnable et reconnaissance de texte (OCR).
+   Une couche de texte invisible (mode de rendu 3, police Liberation Sans)
+   est posée exactement sur les mots de l'image : le texte peut être
+   sélectionné, copié, cherché, lu à voix haute et exporté.
+   Sources des mots : la mise en page HTML (conversions Word, ODT,
+   PowerPoint, Excel, HTML, texte) ou Tesseract.js (OCR, sur l'appareil).
+   ===================================================================== */
+/* mots d'un document HTML affiché : position de chaque mot (pixels CSS) */
+function domWords(d) {
+  const out = [], rng = d.createRange(), tw = d.createTreeWalker(d.body, NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = tw.nextNode())) {
+    const s = n.nodeValue;
+    if (!s || !s.trim()) continue;
+    const re = /\S+/g; let m;
+    while ((m = re.exec(s))) {
+      rng.setStart(n, m.index); rng.setEnd(n, m.index + m[0].length);
+      const rs = Array.from(rng.getClientRects()).filter(r => r.width > 0 && r.height > 0);
+      if (!rs.length) continue;
+      if (rs.length === 1) { const r = rs[0]; out.push({ t: m[0], x0: r.left, x1: r.right, y0: r.top, y1: r.bottom }); continue; }
+      /* mot coupé en fin de ligne : un morceau par ligne */
+      let i0 = 0;
+      for (let i = 1; i <= m[0].length; i++) {
+        if (i < m[0].length) {
+          rng.setStart(n, m.index + i0); rng.setEnd(n, m.index + i + 1);
+          if (rng.getClientRects().length < 2) continue;
+        }
+        rng.setStart(n, m.index + i0); rng.setEnd(n, m.index + i);
+        const r = rng.getBoundingClientRect();
+        if (r.width > 0) out.push({ t: m[0].slice(i0, i), x0: r.left, x1: r.right, y0: r.top, y1: r.bottom });
+        i0 = i;
+      }
+    }
+  }
+  return out;
+}
+const scaleWord = (w, k, dy) => ({ t: w.t, x0: w.x0 * k, x1: w.x1 * k, y0: w.y0 * k - dy, y1: w.y1 * k - dy });
+/* regroupe des mots (ordre de lecture) en lignes : même hauteur, de gauche à droite, sans grand écart */
+function groupLines(words) {
+  const lines = [];
+  let L0 = null;
+  for (const w of words) {
+    const h = w.y1 - w.y0, c = (w.y0 + w.y1) / 2;
+    if (L0) {
+      const p = L0.words[L0.words.length - 1];
+      if (c > L0.y0 && c < L0.y1 && w.x0 >= p.x1 - h * 0.2 && w.x0 - p.x1 < h * 1.2) {
+        L0.words.push(w); L0.y0 = Math.min(L0.y0, w.y0); L0.y1 = Math.max(L0.y1, w.y1); continue;
+      }
+    }
+    L0 = { y0: w.y0, y1: w.y1, words: [w] }; lines.push(L0);
+  }
+  return lines;
+}
+
+const Ink = {
+  ttf: null,
+  /* police de la couche invisible : une par document pdf-lib */
+  async font(doc) {
+    if (doc.__ink) return doc.__ink;
+    await loadScript("vendor/fontkit.umd.min.js");
+    doc.registerFontkit(window.fontkit);
+    if (!Ink.ttf) Ink.ttf = new Uint8Array(await (await fetch("vendor/fonts/LiberationSans-Regular.ttf")).arrayBuffer());
+    const font = await doc.embedFont(Ink.ttf, { subset: true });
+    /* métriques de Liberation Sans (FontDescriptor : Ascent 905, Descent -212 pour 1000) */
+    doc.__ink = { font, charset: new Set(font.getCharacterSet()), h1: 1.117, desc: 0.212 };
+    return doc.__ink;
+  },
+  /* lines : [{ y0, y1, words: [{ t, x0, x1 }] }] en pixels d'une image (origine en haut à gauche) ;
+     toPdf(x, y) -> [X, Y] dans l'espace de la page PDF. Renvoie le nombre de mots posés. */
+  async add(doc, page, lines, toPdf) {
+    const L = window.PDFLib, ctx = doc.context, N = n => L.PDFName.of(n);
+    const { font, charset, h1, desc } = await Ink.font(doc);
+    const fName = page.node.newFontDictionary("FInk", font.ref);
+    const f = v => (+v).toFixed(3);
+    let ops = "", count = 0;
+    for (const ln of lines) {
+      const ws = ln.words;
+      for (let i = 0; i < ws.length; i++) {
+        const w = ws[i], last = i === ws.length - 1;
+        let t = Array.from(w.t).map(ch => charset.has(ch.codePointAt(0)) ? ch : "?").join("");
+        if (!t.trim()) continue;
+        if (!last) t += " ";
+        /* largeur visée : jusqu'au mot suivant (espace compris) */
+        const x1 = last ? w.x1 : Math.max(w.x1, ws[i + 1].x0);
+        /* hauteur : celle de la ligne, ou celle du mot si elle est connue (OCR : ligne de base) */
+        const top = w.ty0 != null ? w.ty0 : ln.y0, bot = w.ty1 != null ? w.ty1 : ln.y1;
+        const P0 = toPdf(w.x0, bot), P1 = toPdf(x1, bot), P2 = toPdf(w.x0, top);
+        const ux = P1[0] - P0[0], uy = P1[1] - P0[1], vx = P2[0] - P0[0], vy = P2[1] - P0[1];
+        const lu = Math.hypot(ux, uy), lv = Math.hypot(vx, vy);
+        if (lu < 0.1 || lv < 0.1) continue;
+        const size = lv / h1, w1 = font.widthOfTextAtSize(t, size);
+        const tz = clamp(lu / w1 * 100, 5, 2000);
+        const bx = P0[0] + vx / lv * desc * size, by = P0[1] + vy / lv * desc * size;
+        ops += f(ux / lu * size) + " " + f(uy / lu * size) + " " + f(vx / lv * size) + " " + f(vy / lv * size) + " " +
+          f(bx) + " " + f(by) + " Tm " + tz.toFixed(2) + " Tz " + font.encodeText(t).toString() + " Tj\n";
+        count++;
+      }
+    }
+    if (!ops) return 0;
+    /* contenu existant isolé entre q … Q, puis la couche de texte invisible */
+    const enc = new TextEncoder();
+    const qRef = ctx.register(ctx.stream(enc.encode("q\n")));
+    const inkRef = ctx.register(ctx.flateStream(enc.encode("Q\nq BT 3 Tr " + fName + " 1 Tf\n" + ops + "ET Q\n")));
+    const cur = page.node.get(N("Contents"));
+    let arr = [];
+    if (cur) { const o = ctx.lookup(cur); arr = o instanceof L.PDFArray ? o.asArray() : [cur]; }
+    page.node.set(N("Contents"), ctx.obj([qRef, ...arr, inkRef]));
+    return count;
+  }
+};
+
+/* --- OCR : Tesseract.js 7 (moteur LSTM, français), entièrement sur l'appareil.
+   Téléchargé à la première utilisation (~4,6 Mo), puis conservé hors ligne. */
+const OCR = {
+  w: null, onLog: null,
+  async worker() {
+    if (!OCR.w) {
+      OCR.w = (async () => {
+        await loadScript("vendor/tesseract/tesseract.min.js");
+        return window.Tesseract.createWorker("fra", 1, {
+          workerPath: absUrl("vendor/tesseract/worker.min.js"), corePath: absUrl("vendor/tesseract/core/"),
+          langPath: absUrl("vendor/tesseract/lang"), gzip: true, cacheMethod: "none", workerBlobURL: false,
+          logger: m => OCR.onLog && OCR.onLog(m),
+          errorHandler: e => console.warn("OCR :", e) });
+      })();
+      OCR.w.catch(() => { OCR.w = null; });
+    }
+    return OCR.w;
+  },
+  async done() { const p = OCR.w; OCR.w = null; if (p) { try { await (await p).terminate(); } catch (e) {} } },
+  /* lignes de mots reconnus dans une image (canvas), en pixels de l'image */
+  async lines(canvas) {
+    const w = await OCR.worker();
+    const { data } = await w.recognize(canvas, {}, { blocks: true, text: false });
+    const out = [];
+    for (const b of data.blocks || []) for (const p of b.paragraphs || []) for (const l of p.lines || []) {
+      /* ligne de base (interpolée le long de la ligne) : le texte invisible est posé dessus ;
+         taille du texte : hauteur de ligne mesurée par Tesseract (jambages compris, accents exclus) */
+      const bl = l.baseline && l.baseline.has_baseline !== false && l.baseline.x1 > l.baseline.x0 ? l.baseline : null;
+      const baseAt = x => bl ? bl.y0 + (bl.y1 - bl.y0) * (x - bl.x0) / (bl.x1 - bl.x0) : l.bbox.y1;
+      const rh = l.rowAttributes && l.rowAttributes.rowHeight;
+      const em = Math.max(4, rh > 0 ? rh * 1.05 : (l.bbox.y1 - l.bbox.y0) * 0.9);
+      const words = (l.words || []).filter(x => x.text && x.text.trim() && x.confidence > 20).map(x => {
+        const base = baseAt((x.bbox.x0 + x.bbox.x1) / 2);
+        return { t: x.text.trim(), x0: x.bbox.x0, x1: x.bbox.x1, ty0: base - 0.905 * em, ty1: base + 0.212 * em };
+      });
+      if (words.length) out.push({ y0: l.bbox.y0, y1: l.bbox.y1, words });
+    }
+    return out;
+  },
+  /* message de progression pour busy() */
+  progress(prefix) {
+    OCR.onLog = m => {
+      const st = { "loading tesseract core": "chargement du moteur", "initializing tesseract": "préparation",
+        "loading language traineddata": "chargement du français", "initializing api": "préparation",
+        "recognizing text": "lecture" }[m.status];
+      if (st) busy(true, prefix + " — " + st + (m.progress > 0 && m.progress < 1 ? " " + Math.round(m.progress * 100) + " %" : "") + "…");
+    };
+  }
+};
+/* image prête pour l'OCR : taille suffisante (~300 ppp pour une page A4), sans dépasser 9 Mpx */
+function ocrCanvas(src) {
+  const k = clamp(Math.min(2400 / Math.min(src.width, src.height), Math.sqrt(9e6 / (src.width * src.height))), 0.25, 3);
+  if (Math.abs(k - 1) < 0.05) return { c: src, k: 1 };
+  const c = document.createElement("canvas"); c.width = Math.round(src.width * k); c.height = Math.round(src.height * k);
+  const x = c.getContext("2d"); x.imageSmoothingQuality = "high"; x.drawImage(src, 0, 0, c.width, c.height);
+  return { c, k: c.width / src.width };
+}
+/* lignes OCR d'une image, ramenées aux pixels de l'image d'origine */
+async function ocrImage(src) {
+  const { c, k } = ocrCanvas(src);
+  const lines = await OCR.lines(c);
+  if (k !== 1) for (const l of lines) { l.y0 /= k; l.y1 /= k; for (const w of l.words) { w.x0 /= k; w.x1 /= k; w.ty0 /= k; w.ty1 /= k; } }
+  if (c !== src) c.width = c.height = 1;
+  return lines;
+}
+/* menu « Reconnaître le texte » : document affiché, annotations et champs conservés */
+async function ocrCurrent() {
+  if (!S.doc) return;
+  const keep = { items: S.items, values: S.values, wm: S.wm, name: S.name, cur: S.cur };
+  busy(true, "Reconnaissance du texte…");
+  let r;
+  try { r = await ocrPdf(S.bytes.slice(0)); }
+  catch (e) { console.error(e); busy(false); toast("Reconnaissance impossible : " + (e && e.message ? e.message : e), 6000); return; }
+  busy(false);
+  if (!r.pages) { toast("Toutes les pages contiennent déjà du texte : rien à reconnaître.", 4000); return; }
+  snapshot(true);
+  if (!(await openBytes(r.bytes, keep.name, { force: true, noRecent: true, keepUndo: true }))) { S.undo.pop(); updateUndo(); return; }
+  S.items = keep.items; S.values = keep.values; S.wm = keep.wm;
+  renderFields(); render(); updatePill();
+  Recents.addCurrent();
+  toast(r.words + " mots reconnus sur " + r.pages + " page" + (r.pages > 1 ? "s" : "") +
+    (r.already ? " (" + r.already + " page" + (r.already > 1 ? "s" : "") + " contenai" + (r.already > 1 ? "en" : "") + "t déjà du texte)" : "") +
+    " : le texte est maintenant sélectionnable et cherchable.", 5000);
+}
+/* OCR d'un PDF : chaque page sans texte reçoit une couche de texte invisible */
+async function ocrPdf(bytes, label) {
+  const L = window.PDFLib;
+  const src = await openPdf(bytes);
+  const doc = await L.PDFDocument.load(bytes, { updateMetadata: false });
+  const pages = doc.getPages();
+  let done = 0, words = 0, already = 0;
+  try {
+    for (let i = 0; i < src.numPages; i++) {
+      const pg = await src.getPage(i + 1);
+      const tc = await pg.getTextContent();
+      if (tc.items.reduce((n, it) => n + (it.str ? it.str.trim().length : 0), 0) > 20) { already++; pg.cleanup(); continue; }
+      OCR.progress((label || "Reconnaissance du texte") + " — page " + (i + 1) + " sur " + src.numPages);
+      const v1 = pg.getViewport({ scale: 1 });
+      const k = clamp(Math.min(2400 / Math.min(v1.width, v1.height), Math.sqrt(9e6 / (v1.width * v1.height))), 1, 5);
+      const vp = pg.getViewport({ scale: k });
+      const c = document.createElement("canvas"); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+      const cx = c.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0, 0, c.width, c.height);
+      await pg.render({ canvasContext: cx, viewport: vp }).promise;
+      pg.cleanup();
+      const lines = await OCR.lines(c);
+      c.width = c.height = 1;
+      words += await Ink.add(doc, pages[i], lines, (x, y) => vp.convertToPdfPoint(x, y));
+      done++;
+    }
+  } finally { try { await src.destroy(); } catch (e) {} await OCR.done(); OCR.onLog = null; }
+  return { bytes: done ? await doc.save() : null, pages: done, already, words };
 }
 
 /* --- OpenDocument texte -> HTML */
@@ -4069,7 +4844,9 @@ const Conv = {
     if (!files.length) return;
     const L = window.PDFLib;
     const out = await L.PDFDocument.create();
-    const fit = $("#convFit").value;
+    const fit = $("#convFit").value, ocr = $("#convOcr").checked;
+    PREF.convOcr = ocr; Prof.savePref();
+    Conv.words = 0;
     const skipped = [];
     busy(true, "Conversion…");
     try {
@@ -4080,7 +4857,8 @@ const Conv = {
         if (/\.(rtf|pages|key|numbers)$/i.test(low)) { skipped.push(name + " (format non pris en charge)"); continue; }
         try {
           if (/^image\//.test(f.type) || /\.(jpe?g|png|gif|webp|bmp|heic|heif|avif)$/i.test(low)) {
-            await Conv.image(out, f, fit);
+            if (ocr) OCR.progress("« " + name + " » : reconnaissance du texte");
+            await Conv.image(out, f, fit, ocr);
           } else if (/\.pdf$/i.test(low) || f.type === "application/pdf") {
             const src = await L.PDFDocument.load(new Uint8Array(await f.arrayBuffer()), { ignoreEncryption: true });
             (await out.copyPages(src, src.getPageIndices())).forEach(p => out.addPage(p));
@@ -4117,6 +4895,7 @@ const Conv = {
           } else { skipped.push(name + " (format inconnu)"); }
         } catch (e) { console.warn("conversion impossible :", name, e); skipped.push(name + " (" + e.message + ")"); }
       }
+      await OCR.done(); OCR.onLog = null;
       if (!out.getPageCount()) { busy(false); toast("Aucun fichier n'a pu être converti : " + skipped.join(", "), 7000); return; }
       const first = files[0].name.replace(/\.[^.]+$/, "") || "document";
       const bytes = await out.save();
@@ -4127,9 +4906,9 @@ const Conv = {
       else if (files.some(x => /\.(doc|dot|ppt|pps|pot)$/i.test(x.name || "")))
         toast("Ancien format Office : texte et structure repris, sans les images ni la mise en forme d'origine.", 6000);
       else toast("Conversion terminée : " + out.getPageCount() + " page" + (out.getPageCount() > 1 ? "s" : "") + ".", 3000);
-    } finally { busy(false); }
+    } finally { busy(false); OCR.done(); OCR.onLog = null; }
   },
-  async image(doc, f, fit) {
+  async image(doc, f, fit, ocr) {
     const url = URL.createObjectURL(f);
     try {
       const im = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error("image illisible par ce navigateur")); i.src = url; });
@@ -4141,15 +4920,23 @@ const Conv = {
       const blob = await new Promise(r => c.toBlob(r, png ? "image/png" : "image/jpeg", 0.92));
       const data = new Uint8Array(await blob.arrayBuffer());
       const img = png ? await doc.embedPng(data) : await doc.embedJpg(data);
+      let page, box;
       if (fit === "image") {
         const W = im.naturalWidth * 0.75, H = im.naturalHeight * 0.75;          /* 96 ppp -> points */
-        doc.addPage([W, H]).drawImage(img, { x: 0, y: 0, width: W, height: H });
+        box = { x: 0, y: 0, width: W, height: H };
+        page = doc.addPage([W, H]);
       } else {
         const land = im.naturalWidth > im.naturalHeight;
         const W = land ? A4.h : A4.w, H = land ? A4.w : A4.h, m = 28;
         const s = Math.min((W - 2 * m) / im.naturalWidth, (H - 2 * m) / im.naturalHeight);
         const w = im.naturalWidth * s, h = im.naturalHeight * s;
-        doc.addPage([W, H]).drawImage(img, { x: (W - w) / 2, y: (H - h) / 2, width: w, height: h });
+        box = { x: (W - w) / 2, y: (H - h) / 2, width: w, height: h };
+        page = doc.addPage([W, H]);
+      }
+      page.drawImage(img, box);
+      if (ocr) {
+        const lines = await ocrImage(c), cw = c.width, ch = c.height;
+        Conv.words += await Ink.add(doc, page, lines, (x, y) => [box.x + x * box.width / cw, box.y + box.height - y * box.height / ch]);
       }
       c.width = c.height = 1;
     } finally { URL.revokeObjectURL(url); }
@@ -4157,6 +4944,9 @@ const Conv = {
 };
 
 /* ==================================================== comparer deux PDF */
+/* Comparaison (version 4.7) : mots positionnés de chaque ligne. La position d'un mot
+   est estimée en répartissant la largeur du fragment de texte selon le nombre de
+   caractères (approximation, exacte pour une police à chasse fixe).            */
 async function pageLines(doc) {
   const out = [];
   for (let i = 1; i <= doc.numPages; i++) {
@@ -4178,28 +4968,99 @@ async function pageLines(doc) {
     out.push({ w: vp.width, h: vp.height, lines: lines.map(L0 => {
       L0.items.sort((p, q) => p.x - q.x);
       const x0 = Math.min(...L0.items.map(t => t.x)), x1 = Math.max(...L0.items.map(t => t.x + t.w));
+      const words = [];
+      for (const t of L0.items) {
+        const re = /\S+/g, n = t.s.length || 1; let m;
+        while ((m = re.exec(t.s))) words.push({ s: m[0], x: t.x + t.w * m.index / n, w: Math.max(2, t.w * m[0].length / n) });
+      }
       const txt = L0.items.map(t => t.s).join(" ");
-      return { t: txt.replace(/\s+/g, " ").trim(), n: txt.replace(/\s+/g, "").toLowerCase(), x: x0, y: L0.y - L0.h, w: Math.max(4, x1 - x0), h: L0.h * 1.25 };
+      return { t: txt.replace(/\s+/g, " ").trim(), k: txt.replace(/\s+/g, ""), x: x0, y: L0.y - L0.h, w: Math.max(4, x1 - x0),
+               h: L0.h * 1.25, words };
     }) });
     pg.cleanup();
   }
   return out;
 }
-/* plus longue sous-suite commune : lignes identiques des deux côtés */
-function lcsDiff(A, B) {
-  const n = A.length, m = B.length, dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
-  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
-    dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-  const delA = new Set(), addB = new Set();
+/* plus longue sous-suite commune, avec débuts et fins communs retirés d'abord.
+   Renvoie la suite d'opérations ["=", i, j] / ["-", i] / ["+", j], ou null si trop grand. */
+function lcsOps(A, B, maxCells) {
+  const n = A.length, m = B.length;
+  let pre = 0; while (pre < n && pre < m && A[pre] === B[pre]) pre++;
+  let suf = 0; while (suf < n - pre && suf < m - pre && A[n - 1 - suf] === B[m - 1 - suf]) suf++;
+  const a = A.slice(pre, n - suf), b = B.slice(pre, m - suf), N = a.length, M = b.length;
+  if ((N + 1) * (M + 1) > (maxCells || 1.2e7)) return null;
+  const ops = [];
+  for (let i = 0; i < pre; i++) ops.push(["=", i, i]);
+  const W = M + 1, dp = new Uint32Array((N + 1) * W);
+  for (let i = N - 1; i >= 0; i--) for (let j = M - 1; j >= 0; j--)
+    dp[i * W + j] = a[i] === b[j] ? dp[(i + 1) * W + j + 1] + 1 : Math.max(dp[(i + 1) * W + j], dp[i * W + j + 1]);
   let i = 0, j = 0;
-  while (i < n && j < m) {
-    if (A[i] === B[j]) { i++; j++; }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) delA.add(i++);
-    else addB.add(j++);
+  while (i < N && j < M) {
+    if (a[i] === b[j]) { ops.push(["=", pre + i, pre + j]); i++; j++; }
+    else if (dp[(i + 1) * W + j] >= dp[i * W + j + 1]) ops.push(["-", pre + i++]);
+    else ops.push(["+", pre + j++]);
   }
-  while (i < n) delA.add(i++);
-  while (j < m) addB.add(j++);
-  return { delA, addB };
+  while (i < N) ops.push(["-", pre + i++]);
+  while (j < M) ops.push(["+", pre + j++]);
+  for (let k = 0; k < suf; k++) ops.push(["=", n - suf + k, m - suf + k]);
+  return ops;
+}
+/* différences mot par mot : lignes d'abord (sur tout le document), puis mots
+   à l'intérieur des blocs de lignes modifiés. Un simple changement de retour à
+   la ligne (mêmes mots) n'est pas une différence.                            */
+function wordDiff(LA, LB) {
+  const flat = P => { const o = []; P.forEach((pg, pi) => pg.lines.forEach((l, li) => o.push({ pi, li, l }))); return o; };
+  const FA = flat(LA), FB = flat(LB);
+  let groups = [];
+  const ops = lcsOps(FA.map(x => x.l.k), FB.map(x => x.l.k));
+  if (ops) groups.push({ ops, FA, FB });
+  else {                                          /* très long document : page par page */
+    for (let i = 0; i < Math.max(LA.length, LB.length); i++) {
+      const fa = FA.filter(x => x.pi === i), fb = FB.filter(x => x.pi === i);
+      groups.push({ ops: lcsOps(fa.map(x => x.l.k), fb.map(x => x.l.k), 4e7) || [...fa.map((x, k) => ["-", k]), ...fb.map((x, k) => ["+", k])], FA: fa, FB: fb });
+    }
+  }
+  const marks = { A: LA.map(() => []), B: LB.map(() => []) }, diffs = [];
+  const box = (x, w, kind) => ({ x: w.x, y: x.l.y, w: w.w, h: x.l.h, kind });
+  for (const g of groups) {
+    let ha = [], hb = [];
+    const flush = () => {
+      if (!ha.length && !hb.length) return;
+      const wa = [], wb = [];
+      ha.forEach(x => x.l.words.forEach(w => wa.push({ x, w })));
+      hb.forEach(x => x.l.words.forEach(w => wb.push({ x, w })));
+      const wops = lcsOps(wa.map(o => o.w.s), wb.map(o => o.w.s), 6e6) || [...wa.map((o, k) => ["-", k]), ...wb.map((o, k) => ["+", k])];
+      const del = new Set(), add = new Set();
+      wops.forEach(o => { if (o[0] === "-") del.add(o[1]); else if (o[0] === "+") add.add(o[1]); });
+      if (del.size || add.size) {
+        /* lignes concernées : teinte légère ; mots changés : surlignage franc */
+        const touchedA = new Set([...del].map(k => wa[k].x)), touchedB = new Set([...add].map(k => wb[k].x));
+        touchedA.forEach(x => marks.A[x.pi].push({ x: x.l.x, y: x.l.y, w: x.l.w, h: x.l.h, kind: "line" }));
+        touchedB.forEach(x => marks.B[x.pi].push({ x: x.l.x, y: x.l.y, w: x.l.w, h: x.l.h, kind: "line" }));
+        del.forEach(k => marks.A[wa[k].x.pi].push(box(wa[k].x, wa[k].w, "del")));
+        add.forEach(k => marks.B[wb[k].x.pi].push(box(wb[k].x, wb[k].w, "add")));
+        /* une différence par groupe de mots changés contigus (séparés par au moins un mot identique) */
+        let cl = { d: [], a: [] };
+        const push = () => {
+          if (!cl.d.length && !cl.a.length) return;
+          const fa = cl.d.length ? wa[cl.d[0]].x : null, fb = cl.a.length ? wb[cl.a[0]].x : null;
+          diffs.push({ old: cl.d.map(k => wa[k].w.s).join(" "), neu: cl.a.map(k => wb[k].w.s).join(" "),
+            aPage: fa ? fa.pi : null, aY: fa ? fa.l.y : 0, bPage: fb ? fb.pi : null, bY: fb ? fb.l.y : 0 });
+          cl = { d: [], a: [] };
+        };
+        for (const o of wops) { if (o[0] === "=") push(); else if (o[0] === "-") cl.d.push(o[1]); else cl.a.push(o[1]); }
+        push();
+      }
+      ha = []; hb = [];
+    };
+    for (const o of g.ops) {
+      if (o[0] === "=") flush();
+      else if (o[0] === "-") ha.push(g.FA[o[1]]);
+      else hb.push(g.FB[o[1]]);
+    }
+    flush();
+  }
+  return { marks, diffs };
 }
 const Cmp = {
   a: null, b: null, rows: [], diffs: [], cur: -1, mode: "text",
@@ -4210,7 +5071,7 @@ const Cmp = {
     try {
       const bytes = await buildVector();
       Cmp.cleanup();
-      Cmp.a = { name: S.name, pdf: await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise };
+      Cmp.a = { name: S.name, pdf: await openPdf(bytes) };
     } finally { busy(false); }
     $("#cmpTitle").textContent = "Comparer « " + S.name.replace(/\.pdf$/i, "") + " »";
     $("#cmpSub").textContent = "Choisissez le second PDF à comparer";
@@ -4218,6 +5079,7 @@ const Cmp = {
       '<button class="primary" id="cmpPick2">' + icon("open") + " Choisir le 2e PDF</button></div>";
     $("#cmpPick2").onclick = () => $("#fileCmp").click();
     $("#cmpBar").hidden = true;
+    $("#cmpList").hidden = true; $("#cmpList").innerHTML = ""; $("#cmpListBtn").setAttribute("aria-pressed", "false");
     openPanel("pnCmp");
     $("#pnCmp")._onclose = () => Cmp.cleanup();
   },
@@ -4230,24 +5092,14 @@ const Cmp = {
     busy(true, "Lecture du second document…");
     try {
       if (Cmp.b) { try { Cmp.b.pdf.destroy(); } catch (e) {} }
-      Cmp.b = { name: file.name, pdf: await pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false }).promise };
+      Cmp.b = { name: file.name, pdf: await openPdf(new Uint8Array(await file.arrayBuffer())) };
       busy(true, "Analyse des différences…");
       const LA = await pageLines(Cmp.a.pdf), LB = await pageLines(Cmp.b.pdf);
       const n = Math.max(LA.length, LB.length);
-      Cmp.rows = []; Cmp.diffs = [];
-      for (let i = 0; i < n; i++) {
-        const A = LA[i], B = LB[i];
-        const row = { i, A, B, delA: new Set(), addB: new Set() };
-        if (A && B) Object.assign(row, lcsDiff(A.lines.map(l => l.n), B.lines.map(l => l.n)));
-        else if (A) A.lines.forEach((l, k) => row.delA.add(k));
-        else B.lines.forEach((l, k) => row.addB.add(k));
-        /* une différence = un bloc de lignes modifiées consécutives */
-        const marks = [...[...row.delA].map(k => ({ y: A.lines[k].y })), ...[...row.addB].map(k => ({ y: B.lines[k].y }))].sort((p, q) => p.y - q.y);
-        let last = -1e9;
-        for (const m of marks) { if (m.y - last > 30) Cmp.diffs.push({ row: i, y: m.y }); last = m.y; }
-        if ((!A || !B) && !marks.length) Cmp.diffs.push({ row: i, y: 0 });
-        Cmp.rows.push(row);
-      }
+      const wd = wordDiff(LA, LB);
+      Cmp.rows = []; Cmp.diffs = wd.diffs;
+      for (let i = 0; i < n; i++) Cmp.rows.push({ i, A: LA[i], B: LB[i], mA: wd.marks.A[i] || [], mB: wd.marks.B[i] || [] });
+      Cmp.renderList();
       $("#cmpSub").textContent = "A : " + Cmp.a.name + " · B : " + Cmp.b.name;
       $("#cmpBar").hidden = false;
       await Cmp.render();
@@ -4274,11 +5126,13 @@ const Cmp = {
         await pg.render({ canvasContext: cv.getContext("2d"), viewport: vp }).promise;
         cell.style.width = colW + "px"; cell.appendChild(cv);
         if (Cmp.mode === "text") {
-          const set = side === "A" ? r.delA : r.addB;
-          for (const idx of set) {
-            const l = info.lines[idx], d = document.createElement("div");
-            d.className = "cmp-hl " + (side === "A" ? "del" : "add");
-            d.style.cssText = "left:" + (l.x * k - 2) + "px;top:" + (l.y * k - 1) + "px;width:" + (l.w * k + 4) + "px;height:" + (l.h * k + 2) + "px";
+          /* lignes modifiées teintées, mots changés surlignés */
+          const ms = (side === "A" ? r.mA : r.mB).slice().sort((p, q) => (p.kind === "line" ? 0 : 1) - (q.kind === "line" ? 0 : 1));
+          for (const mk of ms) {
+            const d = document.createElement("div");
+            d.className = "cmp-hl " + (mk.kind === "line" ? "line " + (side === "A" ? "del" : "add") : mk.kind);
+            const pad = mk.kind === "line" ? 2 : 1;
+            d.style.cssText = "left:" + (mk.x * k - pad) + "px;top:" + (mk.y * k - 1) + "px;width:" + (mk.w * k + 2 * pad) + "px;height:" + (mk.h * k + 2) + "px";
             cell.appendChild(d);
           }
         }
@@ -4305,15 +5159,28 @@ const Cmp = {
     bx.putImageData(bd, 0, 0);
     return n;
   },
-  step(d) {
+  step(d, abs) {
     if (!Cmp.diffs.length) return;
-    Cmp.cur = (Cmp.cur + d + Cmp.diffs.length) % Cmp.diffs.length;
-    const df = Cmp.diffs[Cmp.cur], row = $('.cmp-row[data-row="' + df.row + '"]'), body = $("#cmpBody");
+    Cmp.cur = abs != null ? abs : (Cmp.cur + d + Cmp.diffs.length) % Cmp.diffs.length;
+    const df = Cmp.diffs[Cmp.cur], pi = df.aPage != null ? df.aPage : df.bPage, y = df.aPage != null ? df.aY : df.bY;
+    const row = $('.cmp-row[data-row="' + pi + '"]'), body = $("#cmpBody");
     if (!row) return;
-    const cell = row.querySelector(".cmp-cell canvas"), r = Cmp.rows[df.row], info = r.A || r.B;
+    const cell = row.querySelector(".cmp-cell canvas"), r = Cmp.rows[pi], info = r.A || r.B;
     const k = cell ? parseFloat(cell.style.width) / info.w : 1;
-    body.scrollTo({ top: row.offsetTop + df.y * k - body.clientHeight * 0.3, behavior: "smooth" });
+    body.scrollTo({ top: row.offsetTop + y * k - body.clientHeight * 0.3, behavior: "smooth" });
     $("#cmpCount").textContent = "Différence " + (Cmp.cur + 1) + " sur " + Cmp.diffs.length;
+    $$("#cmpList li").forEach((li, i) => li.classList.toggle("on", i === Cmp.cur));
+  },
+  /* liste des différences : ancien texte -> nouveau texte */
+  renderList() {
+    const ul = $("#cmpList"), cut = t => t.length > 160 ? t.slice(0, 157) + "…" : t;
+    ul.innerHTML = Cmp.diffs.map((df, i) => {
+      const pg = "p. " + ((df.aPage != null ? df.aPage : df.bPage) + 1);
+      const body = df.old && df.neu ? '<del>' + esc(cut(df.old)) + "</del> → <ins>" + esc(cut(df.neu)) + "</ins>"
+        : df.old ? 'supprimé : <del>' + esc(cut(df.old)) + "</del>" : 'ajouté : <ins>' + esc(cut(df.neu)) + "</ins>";
+      return '<li data-i="' + i + '"><small>' + pg + "</small> " + body + "</li>";
+    }).join("") || "<li>Aucune différence de texte.</li>";
+    ul.querySelectorAll("li[data-i]").forEach(li => li.onclick = () => { Cmp.step(0, +li.dataset.i); });
   }
 };
 
@@ -4783,13 +5650,15 @@ async function sheetsToPdf(doc, sheets, onSheet) {
    ===================================================================== */
 const Show = {
   pdf: null, i: 0, n: 0, cache: new Map(), token: 0, hideT: null,
+  auto: false, autoT: null, laser: false, t0: 0, clockT: null,
+  DELAYS: [3, 5, 8, 10, 15, 20, 30, 60],
   async start(from) {
     if (!S.doc) return;
     if (curSheet) closeSheet();
     busy(true, "Préparation du diaporama…");
     try {
       const bytes = await buildVector();
-      Show.pdf = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+      Show.pdf = await openPdf(bytes);
     } catch (e) { busy(false); toast("Diaporama impossible : " + e.message, 5000); return; }
     busy(false);
     Show.n = Show.pdf.numPages; Show.i = clamp(from || 0, 0, Show.n - 1); Show.cache.clear();
@@ -4800,11 +5669,16 @@ const Show = {
     const el = document.documentElement;
     try { if (el.requestFullscreen && !document.fullscreenElement) await el.requestFullscreen({ navigationUI: "hide" }); } catch (e) {}
     try { if (navigator.wakeLock) Show.lock = await navigator.wakeLock.request("screen"); } catch (e) {}   /* écran toujours allumé */
+    Show.t0 = Date.now(); Show.tick(); clearInterval(Show.clockT); Show.clockT = setInterval(Show.tick, 1000);
+    Show.setAuto(false); Show.setLaser(false); $("#showBlack").hidden = true;
+    $("#showDelay").textContent = Show.delay() + " s";
+    $("#showLoop").setAttribute("aria-pressed", PREF.showLoop ? "true" : "false");
     Show.show();
     Show.chrome(true);
   },
   stop() {
     Show.token++;
+    Show.setAuto(false); Show.setLaser(false); clearInterval(Show.clockT);
     document.body.classList.remove("showing");
     if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
     if (Show.lock) { try { Show.lock.release(); } catch (e) {} Show.lock = null; }
@@ -4851,6 +5725,7 @@ const Show = {
     st.innerHTML = ""; st.appendChild(c);
     c.classList.remove("in-next", "in-prev");
     if (dir) { void c.offsetWidth; c.classList.add(dir > 0 ? "in-next" : "in-prev"); }
+    Show.schedule();                                   /* défilement automatique : délai relancé à chaque page */
     /* préchargement des voisines */
     if (i + 1 < Show.n) Show.render(i + 1).catch(() => {});
     if (i > 0) Show.render(i - 1).catch(() => {});
@@ -4861,19 +5736,107 @@ const Show = {
     if (j >= Show.n) { Show.flash("Fin du document — touchez ✕ pour quitter"); return; }
     Show.i = j; Show.show(d);
   },
+  /* --- défilement automatique */
+  delay() { return Show.DELAYS.includes(PREF.showDelay) ? PREF.showDelay : 5; },
+  setAuto(on) {
+    Show.auto = !!on;
+    const b = $("#showAuto");
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+    b.setAttribute("aria-label", on ? "Mettre en pause" : "Défilement automatique");
+    b.innerHTML = icon(on ? "pause" : "run");
+    if (on) Show.schedule(); else { clearTimeout(Show.autoT); Show.timerBar(0); }
+  },
+  timerBar(sec) {
+    const t = $("#showTimer");
+    t.style.transition = "none"; t.style.width = "0";
+    if (!sec) return;
+    void t.offsetWidth; t.style.transition = "width " + sec + "s linear"; t.style.width = "100%";
+  },
+  schedule() {
+    clearTimeout(Show.autoT);
+    if (!Show.auto || !$("#pnShow").classList.contains("on")) return;
+    const sec = Show.delay();
+    Show.timerBar(sec);
+    Show.autoT = setTimeout(() => {
+      if (Show.i < Show.n - 1) { Show.i++; Show.show(1); }
+      else if (PREF.showLoop) { Show.i = 0; Show.show(1); }
+      else { Show.setAuto(false); Show.flash("Fin du diaporama"); }
+    }, sec * 1000);
+  },
+  nextDelay() {
+    const d = Show.DELAYS, k = d.indexOf(Show.delay());
+    PREF.showDelay = d[(k + 1) % d.length]; Prof.savePref();
+    $("#showDelay").textContent = PREF.showDelay + " s";
+    Show.flash("Défilement : " + PREF.showDelay + " s par page");
+    if (Show.auto) Show.schedule();
+  },
+  toggleLoop() {
+    PREF.showLoop = !PREF.showLoop; Prof.savePref();
+    $("#showLoop").setAttribute("aria-pressed", PREF.showLoop ? "true" : "false");
+    Show.flash(PREF.showLoop ? "Lecture en boucle" : "Arrêt à la dernière page");
+  },
+  /* --- chronomètre de la présentation */
+  tick() {
+    const s = Math.floor((Date.now() - Show.t0) / 1000), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+    $("#showClock").textContent = (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s % 60).padStart(2, "0");
+  },
+  /* --- pointeur laser : point rouge qui suit le doigt (ou la souris), avec une traîne */
+  setLaser(on) {
+    Show.laser = !!on;
+    $("#pnShow").classList.toggle("laser", Show.laser);
+    $("#showLaser").setAttribute("aria-pressed", on ? "true" : "false");
+    Show.trail = []; Show.holding = false; Show.drawLaser();
+    if (on) Show.flash("Pointeur laser : glissez le doigt sur la page");
+  },
+  laserAt(x, y) {
+    Show.trail.push({ x, y, t: performance.now() });
+    if (!Show.laserRaf) Show.laserRaf = requestAnimationFrame(Show.drawLaser);
+  },
+  drawLaser() {
+    Show.laserRaf = 0;
+    const c = $("#showLaserCv"), dpr = window.devicePixelRatio || 1;
+    if (c.width !== Math.round(innerWidth * dpr) || c.height !== Math.round(innerHeight * dpr)) { c.width = Math.round(innerWidth * dpr); c.height = Math.round(innerHeight * dpr); }
+    const x = c.getContext("2d"); x.setTransform(dpr, 0, 0, dpr, 0, 0); x.clearRect(0, 0, innerWidth, innerHeight);
+    const now = performance.now(), LIFE = 450;
+    /* doigt posé (ou souris sur la page) : le point reste visible, seule la traîne s'efface */
+    if (Show.holding && Show.trail && Show.trail.length) { const last = Show.trail[Show.trail.length - 1]; Show.trail.push({ x: last.x, y: last.y, t: now }); }
+    Show.trail = (Show.trail || []).filter(p => now - p.t < LIFE).slice(-80);
+    if (!Show.laser || !Show.trail.length) return;
+    x.lineCap = "round"; x.lineJoin = "round";
+    for (let i = 1; i < Show.trail.length; i++) {
+      const a = Show.trail[i - 1], b = Show.trail[i], k = Math.max(0, 1 - (now - b.t) / LIFE);
+      x.strokeStyle = "rgba(255, 40, 40, " + (0.55 * k).toFixed(3) + ")"; x.lineWidth = 3 + 6 * k;
+      x.beginPath(); x.moveTo(a.x, a.y); x.lineTo(b.x, b.y); x.stroke();
+    }
+    const p = Show.trail[Show.trail.length - 1], k = Math.max(0, 1 - (now - p.t) / LIFE);
+    if (k > 0) {
+      const g = x.createRadialGradient(p.x, p.y, 0, p.x, p.y, 22);
+      g.addColorStop(0, "rgba(255,255,255," + k + ")"); g.addColorStop(0.18, "rgba(255,40,40," + k + ")");
+      g.addColorStop(0.45, "rgba(255,30,30," + (0.45 * k) + ")"); g.addColorStop(1, "rgba(255,0,0,0)");
+      x.fillStyle = g; x.beginPath(); x.arc(p.x, p.y, 22, 0, 7); x.fill();
+    }
+    Show.laserRaf = requestAnimationFrame(Show.drawLaser);
+  },
   flash(msg) { const f = $("#showMsg"); f.textContent = msg; f.classList.add("on"); clearTimeout(Show.msgT); Show.msgT = setTimeout(() => f.classList.remove("on"), 1600); },
-  /* boutons et numéro visibles quelques secondes, puis masqués */
+  /* boutons et numéro visibles quelques secondes, puis masqués (toujours visibles avec le laser) */
   chrome(on) {
-    $("#pnShow").classList.toggle("chrome", on);
+    $("#pnShow").classList.toggle("chrome", on || Show.laser);
     clearTimeout(Show.hideT);
-    if (on) Show.hideT = setTimeout(() => $("#pnShow").classList.remove("chrome"), 2800);
+    if (on && !Show.laser) Show.hideT = setTimeout(() => { if (!Show.laser) $("#pnShow").classList.remove("chrome"); }, 2800);
   }
 };
 function initShow() {
   const st = $("#showStage"), pn = $("#pnShow");
-  let x0 = null, y0 = 0, t0 = 0, swiped = false;
-  st.addEventListener("pointerdown", e => { x0 = e.clientX; y0 = e.clientY; t0 = Date.now(); swiped = false; });
+  let x0 = null, y0 = 0, t0 = 0, swiped = false, laserDown = false;
+  st.addEventListener("pointerdown", e => {
+    if (Show.laser) { laserDown = true; Show.holding = true; try { st.setPointerCapture(e.pointerId); } catch (er) {} Show.laserAt(e.clientX, e.clientY); return; }
+    x0 = e.clientX; y0 = e.clientY; t0 = Date.now(); swiped = false;
+  });
+  st.addEventListener("pointermove", e => {
+    if (Show.laser && (laserDown || e.pointerType === "mouse")) { e.preventDefault(); if (e.pointerType === "mouse") Show.holding = true; Show.laserAt(e.clientX, e.clientY); }
+  });
   st.addEventListener("pointerup", e => {
+    if (Show.laser) { laserDown = false; if (e.pointerType !== "mouse") Show.holding = false; return; }
     if (x0 === null) return;
     const dx = e.clientX - x0, dy = e.clientY - y0;
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5 && Date.now() - t0 < 800) { swiped = true; Show.go(dx < 0 ? 1 : -1); Show.chrome(false); }
@@ -4881,7 +5844,7 @@ function initShow() {
   });
   /* clic : tiers gauche = précédente, tiers central = afficher les commandes, tiers droit = suivante */
   st.addEventListener("click", e => {
-    if (swiped) return;
+    if (swiped || Show.laser) return;
     const w = window.innerWidth;
     if (e.clientX < w / 3) Show.go(-1);
     else if (e.clientX > w * 2 / 3) Show.go(1);
@@ -4891,6 +5854,16 @@ function initShow() {
   $("#showPrev").onclick = e => { e.stopPropagation(); Show.go(-1); Show.chrome(true); };
   $("#showNext").onclick = e => { e.stopPropagation(); Show.go(1); Show.chrome(true); };
   $("#showClose").onclick = e => { e.stopPropagation(); closePanel(); };
+  $("#showAuto").onclick = e => { e.stopPropagation(); Show.setAuto(!Show.auto); Show.chrome(true);
+    if (Show.auto) Show.flash("Défilement automatique : " + Show.delay() + " s par page"); };
+  $("#showDelay").onclick = e => { e.stopPropagation(); Show.nextDelay(); Show.chrome(true); };
+  $("#showLoop").onclick = e => { e.stopPropagation(); Show.toggleLoop(); Show.chrome(true); };
+  $("#showLaser").onclick = e => { e.stopPropagation(); Show.setLaser(!Show.laser); Show.chrome(true); };
+  $("#showBlack").onclick = () => { $("#showBlack").hidden = true; };
+  /* empêcher le défilement de la page pendant le pointage au doigt */
+  st.addEventListener("touchmove", e => { if (Show.laser) e.preventDefault(); }, { passive: false });
+  st.addEventListener("pointerleave", e => { if (e.pointerType === "mouse") Show.holding = false; });
+  st.addEventListener("pointercancel", () => { laserDown = false; Show.holding = false; });
   document.addEventListener("keydown", e => {
     if (!pn.classList.contains("on")) return;
     const k = e.key;
@@ -4899,6 +5872,9 @@ function initShow() {
     else if (k === "Home") { e.preventDefault(); Show.i = 0; Show.show(-1); }
     else if (k === "End") { e.preventDefault(); Show.i = Show.n - 1; Show.show(1); }
     else if (k === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closePanel(); }
+    else if (k === "a" || k === "A") { e.preventDefault(); $("#showAuto").click(); }
+    else if (k === "l" || k === "L") { e.preventDefault(); Show.setLaser(!Show.laser); Show.chrome(true); }
+    else if (k === "b" || k === "B" || k === ".") { e.preventDefault(); $("#showBlack").hidden = !$("#showBlack").hidden; }
   }, true);
   /* rotation de l'écran ou sortie du plein écran : on redessine à la bonne taille */
   let rt = null;
@@ -4998,6 +5974,10 @@ function initV4() {
   $("#cmpPick").onclick = () => $("#fileCmp").click();
   $("#cmpPrev").onclick = () => Cmp.step(-1);
   $("#cmpNext").onclick = () => Cmp.step(1);
+  $("#cmpListBtn").onclick = () => {
+    const ul = $("#cmpList"), on = ul.hidden; ul.hidden = !on;
+    $("#cmpListBtn").setAttribute("aria-pressed", on ? "true" : "false");
+  };
   $$("#cmpMode button").forEach(b => b.onclick = () => {
     Cmp.mode = b.dataset.m; $$("#cmpMode button").forEach(x => x.classList.toggle("on", x === b));
     if (Cmp.rows.length) Cmp.render();
@@ -5100,13 +6080,77 @@ function initV31() {
   Recents.render();
 }
 
+/* ================================================ versions et mises à jour
+   Nouveautés affichées une fois après chaque mise à jour ; pendant
+   l'utilisation, un bandeau propose de passer à la version téléchargée.     */
+const NEWS = {
+  "4.7.0": ["Fichier allégé : seules les images sont recompressées, le texte reste net et sélectionnable",
+            "Diaporama : défilement automatique (3 s à 1 min par page), lecture en boucle, pointeur laser au doigt, chronomètre",
+            "Comparaison mot par mot, avec la liste des différences « ancien → nouveau »"],
+  "4.6.0": ["Ouverture des PDF protégés par un mot de passe (déchiffrés sur le téléphone)",
+            "« Annuler » couvre aussi les champs de formulaire, la rotation et l'organisation des pages, et la reconnaissance du texte",
+            "Numéro de version affiché sous le titre et en bas de l'accueil ; avis de mise à jour"],
+  "4.5.0": ["Texte sélectionnable et cherchable dans les PDF convertis (Word, ODT, PowerPoint, Excel, HTML)",
+            "Reconnaissance du texte (OCR) des scans et des images, sur le téléphone"],
+  "4.4.0": ["Sécurité renforcée : pdf.js à jour, politique de sécurité du contenu",
+            "Signatures conservées sans limite de place"]
+};
+/* réglages présents avant ce lancement (lu avant que le démarrage n'en crée) */
+const HAD_DATA = (() => { try { return localStorage.getItem("pdfed.profiles") !== null; } catch (e) { return false; } })();
+const verNum = v => String(v || "0").split(".").map(Number).reduce((a, x) => a * 1000 + (x || 0), 0);
+function showNews() {
+  let last = null;
+  try { last = localStorage.getItem("pdfed.lastVersion"); } catch (e) {}
+  try { localStorage.setItem("pdfed.lastVersion", APP_VERSION); } catch (e) {}
+  if (last === APP_VERSION) return;
+  /* première installation : rien à annoncer ; version antérieure à 4.6 : aucune trace, mais des réglages existent */
+  if (!last && !HAD_DATA) return;
+  const vers = Object.keys(NEWS).filter(v => verNum(v) > verNum(last || "4.5.0") && verNum(v) <= verNum(APP_VERSION))
+    .sort((a, b) => verNum(b) - verNum(a));
+  $("#newsTitle").textContent = "LeSacAPDF a été mis à jour";
+  $("#newsSub").textContent = (last ? "Version " + last + " → " : "Nouvelle version : ") + "version " + APP_VERSION + ".";
+  $("#newsList").innerHTML = vers.map(v => "<h3>Version " + esc(v) + "</h3><ul>" + NEWS[v].map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>").join("");
+  $("#newsOk").onclick = () => closeSheet();
+  setTimeout(() => openSheet("shNews"), 400);
+}
+function watchUpdates(reg) {
+  /* page déjà servie par une version précédente : sinon c'est la première installation */
+  const hadController = !!navigator.serviceWorker.controller;
+  const check = () => { try { reg.update().catch(() => {}); } catch (e) {} };
+  setInterval(check, 60 * 60 * 1000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
+  const offer = () => {
+    if (!hadController || watchUpdates.shown) return;
+    watchUpdates.shown = true;
+    $("#updBar").hidden = false;
+  };
+  reg.addEventListener("updatefound", () => {
+    const w = reg.installing; if (!w) return;
+    w.addEventListener("statechange", () => { if (w.state === "installed" || w.state === "activated") offer(); });
+  });
+  $("#updLater").onclick = () => { $("#updBar").hidden = true; };
+  $("#updGo").onclick = async () => {
+    if (S.items.length && !(await ask("Mettre à jour maintenant ?",
+        "L'application va redémarrer : les annotations non enregistrées du document seront perdues.", null))) return;
+    location.reload();
+  };
+}
+
 /* ============================================================== démarrage */
 function init() {
   $("#appVer").textContent = "version " + APP_VERSION;
+  $$(".ver").forEach(e => e.textContent = "version " + APP_VERSION);
   initV31();
   initV4();
   initShow();
   Prof.init();
+  /* signatures : chargement depuis IndexedDB (et migration), puis affichage */
+  window.__appStore = store;                                       /* accès pour les tests */
+  window.__pdfjsVersion = () => pdfjsLib && pdfjsLib.version;
+  window.__docBytes = () => S.bytes ? Array.from(S.bytes) : null;
+  if (!/[?&]shared=1/.test(location.search)) showNews();
+  window.__storeReady = KV.load().then(() => { Sigs.render(); Prof.render(); },
+    e => console.warn("IndexedDB :", e && e.message));
   initSigSheet();
   initPinch();
   initKeyboard();
@@ -5142,7 +6186,7 @@ function init() {
     stamp() { Stamps.open(); },
     wm() { WM.open(); }
   };
-  $$(".tool[data-act]").forEach(b => b.onclick = () => acts[b.dataset.act]());
+  $$(".tool[data-act]").forEach(b => b.onclick = () => { if (roBlock()) return; acts[b.dataset.act](); });
   $("#hintDone").onclick = () => setTool("select");
   $("#btnNewSnip").onclick = () => Snips.openNew();
   $("#txtOk").onclick = textOk;
@@ -5191,6 +6235,7 @@ function init() {
       if (S.items.some(i => i.page === S.cur)) {
         toast("Faites pivoter la page avant d'y ajouter des annotations.", 3500); return;
       }
+      snapshot(true);
       p.rot = (p.rot + 90) % 360;
       const vp = p.page.getViewport({ scale: 1, rotation: p.rot });
       p.dw = vp.width; p.dh = vp.height;
@@ -5210,7 +6255,8 @@ function init() {
     },
     search() { closeSheet(); Search.open(); },
     print() { printDoc(); },
-    convert() { openSheet("shConv"); },
+    convert() { $("#convOcr").checked = PREF.convOcr !== false; openSheet("shConv"); },
+    ocr() { closeSheet(); ocrCurrent(); },
     compare() { closeSheet(); Cmp.start(); },
     wm() { WM.open(); },
     redact() { closeSheet(); setTool("redact"); },
@@ -5235,6 +6281,12 @@ function init() {
     install() { install(); },
     help() { openSheet("shHelp"); }
   };
+  /* lecture seule : actions qui modifient le document */
+  ["organize", "split", "ocr", "wm", "redact", "encrypt", "time", "datetime", "rotate"].forEach(k => {
+    const f = menu[k]; menu[k] = () => { if (roBlock()) { closeSheet(); return; } f(); };
+  });
+  { const f = menu.merge; menu.merge = () => { if (S.doc && roBlock()) { closeSheet(); return; } f(); }; }
+  { const f = menu.print; menu.print = () => { if (S.readOnly && !(S.perm & 4)) { closeSheet(); toast("L'auteur de ce PDF en interdit l'impression."); return; } f(); }; }
   $$("#shMenu [data-m]").forEach(b => b.onclick = () => menu[b.dataset.m]());
   $$("#shLibrary [data-go]").forEach(b => b.onclick = () => {
     if (b.dataset.go === "newsig") Sigs.openNew(); else Snips.openNew();
@@ -5267,8 +6319,8 @@ function init() {
   $("#chkFlatten").onchange = e => { PREF.flatten = e.target.checked; Prof.savePref(); };
 
   /* enregistrement / partage */
-  $("#btnSave").onclick = () => { setTool("select"); select(null); openSave("save"); };
-  $("#btnShare").onclick = () => { setTool("select"); select(null); openSave("share"); };
+  $("#btnSave").onclick = () => { if (roBlock()) return; setTool("select"); select(null); openSave("save"); };
+  $("#btnShare").onclick = () => { if (roBlock()) return; setTool("select"); select(null); openSave("share"); };
   $("#btnPrint").onclick = () => printDoc();
   $$('input[name=smode]').forEach(r => r.onchange = syncSmall);
   $$("#saveFmt button").forEach(b => b.onclick = () => {
@@ -5321,7 +6373,7 @@ function init() {
       $("#saveForm").hidden = true; $("#saveDone").hidden = false;
       $("#doneOpen").hidden = true;
       setDoneMode(S.intent);
-      if (!enc) Recents.add(r.bytes, nm);
+      if (!enc && !S.wasLocked) Recents.add(r.bytes, nm);   /* document déverrouillé : pas de copie en clair */
       $("#shSave").scrollTop = 0;
     } catch (e) {
       console.error(e);
@@ -5455,7 +6507,7 @@ function updatePill() {
 /* mode hors ligne */
 if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch(e => console.warn("service worker :", e));
+    navigator.serviceWorker.register("sw.js").then(watchUpdates).catch(e => console.warn("service worker :", e));
   });
 }
 

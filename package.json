@@ -1,6 +1,6 @@
 {
   "name": "lesacapdf",
-  "version": "4.3.0",
+  "version": "4.7.0",
   "author": "LESACA Julien",
   "license": "UNLICENSED",
   "private": true,
@@ -8,6 +8,9 @@
   "scripts": {
     "serve": "node tools/serve.js 8080",
     "icons": "python3 tools/fill-corners.py && node tools/make-icons.js",
-    "test": "node tools/e2e-test.js"
+    "test": "tools/test-all.sh"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
   }
 }

@@ -2,7 +2,8 @@
 const http = require("http"), fs = require("fs"), path = require("path");
 const root = path.join(__dirname, "..", "www");
 const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css",
-  ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json", ".webmanifest": "application/manifest+json" };
+  ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json", ".webmanifest": "application/manifest+json",
+  ".wasm": "application/wasm", ".mjs": "text/javascript", ".ttf": "font/ttf" };
 const port = +process.argv[2] || 8080;
 http.createServer((req, res) => {
   let p = decodeURIComponent(new URL(req.url, "http://x").pathname);

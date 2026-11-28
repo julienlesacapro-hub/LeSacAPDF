@@ -1,0 +1,46 @@
+# Lance toutes les séries de tests (téléphones Android et iPhone émulés) à chaque
+# pull request et à chaque envoi sur main. Les captures et fichiers produits sont
+# téléchargeables dans l'onglet « Actions » (artefacts « resultats-… »).
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Tests (${{ matrix.device }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        device: [android, iphone]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Navigateur Chromium et outils PDF
+        run: |
+          npx playwright install --with-deps chromium
+          sudo apt-get install -y --no-install-recommends poppler-utils
+      - name: Tests
+        run: tools/test-all.sh ${{ matrix.device }} test-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resultats-${{ matrix.device }}
+          path: test-results
+          retention-days: 14
