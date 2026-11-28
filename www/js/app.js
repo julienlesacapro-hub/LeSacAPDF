@@ -7,7 +7,7 @@
 (function () {
 "use strict";
 
-const APP_VERSION = "4.5.0";
+const APP_VERSION = "4.6.0";
 
 /* Lien de la page de don de l'association PROMEDNAV.
    À RENSEIGNER : tant qu'il est vide, le bouton « Faire un don » affiche
@@ -19,6 +19,7 @@ const DON_URL = "";
    ouverture d'un document. Repli automatique sur la version 3.11 pour les
    navigateurs trop anciens pour la version 6 (Safari < 18, Chrome < 125).  */
 let pdfjsLib = null, pdfjsOld = false, pdfjsP = null;
+let docPassword = null;     /* PDF chiffré ouvert en lecture seule (modification interdite par l'auteur) */
 const absUrl = p => new URL(p, document.baseURI).href;
 function loadPdfjs(old) {
   if (!old) return import(absUrl("vendor/pdfjs/pdf.min.js")).then(m => {
@@ -29,7 +30,9 @@ function loadPdfjs(old) {
 /* copie des octets : pdf.js 6 transfère les données au worker (l'original deviendrait vide) */
 const pdfjsParams = (bytes, old) => {
   const data = new Uint8Array(bytes instanceof ArrayBuffer ? bytes.slice(0) : bytes);
-  return old ? { data, isEvalSupported: false } : { data, isEvalSupported: false, wasmUrl: absUrl("vendor/pdfjs/wasm/") };
+  const p = old ? { data, isEvalSupported: false } : { data, isEvalSupported: false, wasmUrl: absUrl("vendor/pdfjs/wasm/") };
+  if (docPassword != null) p.password = docPassword;
+  return p;
 };
 async function openPdf(bytes) {
   if (!pdfjsP) pdfjsP = loadPdfjs(false).catch(e => {
@@ -278,7 +281,7 @@ let curSheet = null;
 function openSheet(id) {
   const el = $("#" + id);
   if (curSheet && curSheet !== el) curSheet.classList.remove("on");
-  else if (!curSheet) { try { history.pushState({ sheet: 1 }, ""); } catch (e) {} }
+  else if (!curSheet) ensureGuard();
   curSheet = el;
   el.classList.add("on");
   el.scrollTop = 0;
@@ -294,24 +297,31 @@ function hideSheet() {
   document.activeElement && document.activeElement.blur && document.activeElement.blur();
   if (el._onclose) { const f = el._onclose; el._onclose = null; f(); }
 }
-/* un seul « retour » à la fois : un second history.back() avant le popstate
-   ferait quitter l'application */
-let backPending = false;
+/* Bouton « retour » d'Android : une entrée d'historique « garde » est ajoutée quand
+   une fenêtre ou un panneau s'ouvre ; le retour du téléphone la retire et ferme la
+   fenêtre du dessus. L'application ne déclenche jamais history.back() elle-même :
+   ce retour différé pouvait fermer une fenêtre ouverte entre-temps (nouvelle demande
+   de mot de passe, confirmation à la sortie du scanner) ou, compté de travers, faire
+   quitter l'application. Fermer une fenêtre la masque immédiatement.               */
+function ensureGuard() {
+  if (history.state && history.state.lsg) return;
+  try { history.pushState({ lsg: 1 }, ""); } catch (e) {}
+}
 function closeSheet() {
   if (!curSheet) return;
-  if (history.state && history.state.sheet) {               /* popstate -> hideSheet */
-    if (backPending) return;
-    backPending = true; history.back();
-  } else hideSheet();
+  hideSheet();
 }
-window.addEventListener("popstate", () => { backPending = false; if (curSheet) hideSheet(); else hidePanel(); });
+window.addEventListener("popstate", () => {
+  if (curSheet) hideSheet(); else if (panels.length) hidePanel(); else return;
+  if (curSheet || panels.length) ensureGuard();          /* encore quelque chose d'ouvert */
+});
 
 /* panneaux plein écran (organiser, aperçu, scanner), empilables */
 const panels = [];
 function openPanel(id) {
   const el = $("#" + id);
   if (panels.includes(el)) return;
-  try { history.pushState({ panel: 1 }, ""); } catch (e) {}
+  ensureGuard();
   panels.push(el);
   el.classList.add("on");
 }
@@ -323,8 +333,7 @@ function hidePanel() {
 }
 function closePanel() {
   if (!panels.length) return;
-  if (history.state && history.state.panel) { if (backPending) return; backPending = true; history.back(); }
-  else hidePanel();
+  hidePanel();
 }
 
 /* glisser la feuille vers le bas pour la fermer */
@@ -363,15 +372,34 @@ async function openBytes(bytes, name, opt) {
   opt = opt || {};
   if (!opt.force && S.items.length && !(await ask("Ouvrir un autre document ?",
       "Les annotations non enregistrées du document actuel seront perdues.", null))) return false;
+  /* PDF protégé : mot de passe, puis déchiffrement sur l'appareil */
+  let lock = null;
+  if (!opt.keepUndo) {
+    let E = null;
+    try { E = await Unlock.info(bytes); }
+    catch (e) { if (/certificat/.test(e && e.message)) { toast("Ce PDF est protégé par certificat : " + e.message + ".", 6000); return false; } }
+    if (E) {
+      lock = await unlockFlow(bytes, E, name || "document.pdf");
+      if (!lock) return false;
+      bytes = lock.bytes;
+    }
+  }
   busy(true, "Lecture du PDF…");
   try {
-    const doc = await openPdf(bytes.slice(0));
+    const prevPwd = docPassword;
+    docPassword = lock && lock.readOnly ? lock.pwd : null;
+    let doc;
+    try { doc = await openPdf(bytes.slice(0)); } catch (e) { docPassword = prevPwd; throw e; }
     if (S.doc) { try { S.doc.destroy(); } catch (e) {} }
     S.doc = doc;
+    S.readOnly = !!(lock && lock.readOnly); S.perm = lock ? lock.P : -1;
+    if (!opt.keepUndo) S.wasLocked = !!lock;
+    document.body.classList.toggle("readonly", S.readOnly);
     S.bytes = bytes.slice(0);                      // copie intacte pour l'export
     S.name = name || "document.pdf";
     S.srcSize = bytes.length;
-    S.items = []; S.fields = []; S.values = {}; S.undo = []; S.redo = []; S.sel = null; S.cur = 0;
+    S.items = []; S.fields = []; S.values = {}; S.sel = null; S.cur = 0;
+    if (!opt.keepUndo) { S.undo = []; S.redo = []; }
     S.pending = null; setTool("select");
     S.wm = null;
     Search.reset();
@@ -389,12 +417,14 @@ async function openBytes(bytes, name, opt) {
     updateUndo();
     document.title = S.name + " — LeSacAPDF";
     $("#viewer").scrollTo(0, 0);
-    if (!opt.noRecent) Recents.addCurrent();
+    if (!opt.noRecent && !S.readOnly) Recents.addCurrent();
+    if (lock && lock.readOnly) toast("Ouvert en lecture seule : l'auteur de ce PDF en interdit la modification.", 6000);
+    else if (lock) toast("Document déverrouillé. Il sera enregistré sans mot de passe, sauf si vous cochez « Protéger par un mot de passe ».", 6500);
     return true;
   } catch (e) {
     console.error(e);
     const pw = e && e.name === "PasswordException";
-    toast(pw ? "Ce PDF est protégé par un mot de passe : il ne peut pas être modifié ici."
+    toast(pw ? "Mot de passe refusé : ce PDF n'a pas pu être ouvert."
              : "Impossible d'ouvrir ce PDF : " + (e && e.message ? e.message : e), 6000);
     return false;
   } finally { busy(false); }
@@ -403,8 +433,9 @@ async function openBytes(bytes, name, opt) {
 function updateSub() {
   if (!S.doc) return;
   const n = S.doc.numPages;
-  let t = n + " page" + (n > 1 ? "s" : "");
-  if (S.fields.length) t += " · formulaire (" + S.fields.length + " champ" + (S.fields.length > 1 ? "s" : "") + ")";
+  /* version en tête : la place est comptée quand un document est ouvert */
+  let t = "v" + APP_VERSION + " · " + n + " page" + (n > 1 ? "s" : "");
+  if (S.fields.length) t += " · " + S.fields.length + " champ" + (S.fields.length > 1 ? "s" : "");
   $("#docSub").textContent = t;
 }
 
@@ -598,6 +629,7 @@ function renderFields() {
       el.checked = f.radio ? S.values[f.name] === f.exportValue
                            : (S.values[f.name] && S.values[f.name] !== "Off");
       el.onchange = () => {
+        snapshot();
         S.values[f.name] = el.checked ? (f.exportValue || "Yes") : "Off";
       };
     } else if (f.options && f.options.length) {
@@ -609,16 +641,19 @@ function renderFields() {
         el.appendChild(op);
       }
       el.value = S.values[f.name] || "";
-      el.onchange = () => S.values[f.name] = el.value;
+      el.onchange = () => { snapshot(); S.values[f.name] = el.value; };
     } else {
       el = document.createElement(f.multiline ? "textarea" : "input");
       if (!f.multiline) el.type = "text";
       el.value = S.values[f.name] || "";
-      el.oninput = () => S.values[f.name] = el.value;
+      /* texte : une étape par saisie (au premier caractère tapé dans le champ) */
+      el.onfocus = () => { el._snap = false; };
+      el.oninput = () => { if (!el._snap) { snapshot(); el._snap = true; } S.values[f.name] = el.value; };
       el.setAttribute("autocomplete", "off");
     }
     el.className = "field";
     el.title = f.name;
+    if (S.readOnly) el.disabled = true;
     el.style.left = (f.x * S.scale) + "px";
     el.style.top = (f.y * S.scale) + "px";
     if (f.check || f.radio) {
@@ -633,10 +668,20 @@ function renderFields() {
   }
 }
 
-/* ==================================================== annotations : modèle */
-function snapshot() {
-  S.undo.push(JSON.stringify(S.items));
-  if (S.undo.length > 60) S.undo.shift();
+/* ==================================================== annulation (version 4.6)
+   Chaque étape mémorise les annotations et les valeurs des champs ; les
+   opérations sur les pages (organiser, pivoter, reconnaître le texte)
+   mémorisent aussi le document et la rotation des pages.                    */
+const UNDO_MAX = 60, UNDO_DOCS = 8;
+function undoState(withDoc) {
+  const st = { items: JSON.stringify(S.items), values: JSON.stringify(S.values) };
+  if (withDoc) st.doc = { bytes: S.bytes, name: S.name, rots: S.pages.map(p => p.rot), wm: S.wm ? JSON.stringify(S.wm) : null };
+  return st;
+}
+function snapshot(withDoc) {
+  S.undo.push(undoState(withDoc));
+  /* limites : 60 étapes, dont 8 avec une copie du document (mémoire du téléphone) */
+  while (S.undo.length > UNDO_MAX || S.undo.filter(x => x.doc).length > UNDO_DOCS) S.undo.shift();
   S.redo.length = 0;
   updateUndo();
 }
@@ -644,18 +689,38 @@ function updateUndo() {
   $("#btnUndo").disabled = !S.undo.length;
   $("#btnRedo").disabled = !S.redo.length;
 }
-function undo() {
-  if (!S.undo.length) return;
-  S.redo.push(JSON.stringify(S.items));
-  S.items = JSON.parse(S.undo.pop());
-  S.sel = null; renderItems(); showProps(); updateUndo();
+let undoBusy = false;
+async function restoreState(st) {
+  if (st.doc) {
+    if (st.doc.bytes !== S.bytes) {
+      if (!(await openBytes(st.doc.bytes, st.doc.name, { force: true, noRecent: true, keepUndo: true }))) return false;
+    }
+    S.wm = st.doc.wm ? JSON.parse(st.doc.wm) : null;
+    let turned = false;
+    st.doc.rots.forEach((r, i) => {
+      const p = S.pages[i]; if (!p || p.rot === r) return;
+      p.rot = r; const vp = p.page.getViewport({ scale: 1, rotation: r }); p.dw = vp.width; p.dh = vp.height; turned = true;
+    });
+    if (turned) repaintAll();
+  }
+  S.items = JSON.parse(st.items);
+  S.values = JSON.parse(st.values);
+  S.sel = null; renderFields(); renderItems(); showProps();
+  if (st.doc) { render(); updatePill(); }
+  return true;
 }
-function redo() {
-  if (!S.redo.length) return;
-  S.undo.push(JSON.stringify(S.items));
-  S.items = JSON.parse(S.redo.pop());
-  S.sel = null; renderItems(); showProps(); updateUndo();
+async function stepHistory(from, to, label) {
+  if (!from.length || undoBusy) return;
+  undoBusy = true;
+  try {
+    const st = from.pop();
+    to.push(undoState(!!st.doc));
+    if (st.doc) busy(true, label);
+    if (!(await restoreState(st))) { to.pop(); from.push(st); }
+  } finally { undoBusy = false; busy(false); updateUndo(); }
 }
+function undo() { return stepHistory(S.undo, S.redo, "Annulation…"); }
+function redo() { return stepHistory(S.redo, S.undo, "Rétablissement…"); }
 
 function measure(it) {
   const c = measure._c || (measure._c = document.createElement("canvas").getContext("2d"));
@@ -1167,6 +1232,7 @@ const HINTS = {
   redact: "Tracez un rectangle sur ce qui doit disparaître définitivement"
 };
 function setTool(t, keepPending) {
+  if (t !== "select" && roBlock()) t = "select";
   if (!keepPending) S.pending = null;
   S.tool = t;
   if (t !== "select") S.sel = null;
@@ -1899,9 +1965,13 @@ function syncSmall() {
 }
 
 /* ------------------------------------------- petite boîte de dialogue */
-function ask(title, sub, value) {
+function ask(title, sub, value, opts) {
+  opts = opts || {};
   return new Promise(res => {
     const sh = $("#shAsk"), inp = $("#askInput");
+    inp.type = opts.password ? "password" : "text";
+    inp.placeholder = opts.placeholder || "";
+    $("#askCancel").textContent = opts.cancel || "Annuler";
     $("#askTitle").textContent = title;
     $("#askSub").textContent = sub || "";
     $("#askSub").hidden = !sub;
@@ -1913,13 +1983,51 @@ function ask(title, sub, value) {
     sh._onclose = () => finish(null);
     openSheet("shAsk");
     if (value !== null) { inp.focus(); try { inp.select(); } catch (e) {} }
-    $("#askOk").onclick = () => { const v = value === null ? true : inp.value.trim(); finish(v); closeSheet(); };
+    $("#askOk").onclick = () => { const v = value === null ? true : opts.password ? inp.value : inp.value.trim(); finish(v); closeSheet(); };
     $("#askCancel").onclick = () => closeSheet();
     inp.onkeydown = e => {
       e.stopPropagation();
       if (e.key === "Enter") { e.preventDefault(); $("#askOk").click(); }
     };
   });
+}
+
+/* --- déverrouillage d'un PDF protégé : { bytes, readOnly, pwd, P } ou null (abandon) */
+async function unlockFlow(bytes, E, name) {
+  if (!window.crypto || !crypto.subtle) { toast("Déverrouillage impossible : connexion non sécurisée (https requis).", 6000); return null; }
+  let pw = "", k = await Unlock.key(E, ""), wrong = false;
+  while (!k) {
+    pw = await ask("Document protégé", (wrong ? "Mot de passe incorrect. " : "") + "Saisissez le mot de passe de « " + name +
+      " ». Il reste sur ce téléphone.", "", { password: true, placeholder: "Mot de passe" });
+    if (pw === null) return null;
+    busy(true, "Vérification du mot de passe…");
+    try { k = await Unlock.key(E, pw); } finally { busy(false); }
+    wrong = !k;
+  }
+  /* l'auteur interdit la modification : mot de passe propriétaire, sinon lecture seule */
+  if (!k.owner && !Unlock.canEdit(E)) {
+    wrong = false;
+    for (;;) {
+      const po = await ask("Modification interdite par l'auteur", (wrong ? "Mot de passe propriétaire incorrect. " : "") +
+        "Ce PDF peut être lu, mais son auteur en interdit la modification. Saisissez le mot de passe propriétaire pour le modifier.",
+        "", { password: true, cancel: "Lire seulement", placeholder: "Mot de passe propriétaire" });
+      if (po === null) return { bytes, readOnly: true, pwd: pw, P: E.P };
+      busy(true, "Vérification du mot de passe…");
+      let k2; try { k2 = await Unlock.key(E, po); } finally { busy(false); }
+      if (k2 && k2.owner) { k = k2; break; }
+      wrong = true;
+    }
+  }
+  busy(true, "Déverrouillage du document…");
+  try { return { bytes: new Uint8Array(await Unlock.decrypt(bytes, E, k.key)), readOnly: false, P: E.P }; }
+  catch (e) { console.error(e); toast("Déverrouillage impossible : " + (e && e.message ? e.message : e), 6000); return null; }
+  finally { busy(false); }
+}
+/* document en lecture seule : toute modification est refusée */
+function roBlock() {
+  if (!S.readOnly) return false;
+  toast("Lecture seule : l'auteur de ce PDF en interdit la modification (mot de passe propriétaire requis).", 4500);
+  return true;
 }
 
 /* --------------------------------------------------- installation (PWA) */
@@ -2235,6 +2343,8 @@ const Recents = {
   },
   /* document courant : miniature de la 1re page */
   async addCurrent() {
+    /* un document déverrouillé n'est pas conservé en clair dans les récents */
+    if (S.wasLocked) return;
     let thumb = "";
     try {
       const p = S.pages[0];
@@ -2324,7 +2434,7 @@ async function printDoc() {
 /* ------------------------------------------- résultat d'une opération (PDF créé) */
 function showResult(bytes, name, info) {
   S.out = { bytes, name };
-  Recents.add(bytes, name);
+  if (!S.wasLocked) Recents.add(bytes, name);
   $("#doneName").textContent = name;
   $("#doneInfo").textContent = (info ? info + " · " : "") + fmtMo(bytes.length);
   $("#saveForm").hidden = true; $("#saveDone").hidden = false;
@@ -2545,8 +2655,9 @@ const Org = {
         if (!bytes) return;
         const name = S.name;
         closePanel();
-        await openBytes(bytes, name, { force: true });
-        toast("Document mis à jour.");
+        snapshot(true);
+        if (await openBytes(bytes, name, { force: true, keepUndo: true })) toast("Document mis à jour. « Annuler » revient à l'état précédent.", 3500);
+        else { S.undo.pop(); updateUndo(); }
         break;
       }
     }
@@ -3599,6 +3710,212 @@ async function encryptPdf(bytes, password) {
   return doc.save({ useObjectStreams: false, addDefaultPage: false, updateFieldAppearances: false });
 }
 
+/* =====================================================================
+   VERSION 4.6 — ouverture des PDF protégés par mot de passe.
+   Gestionnaire de sécurité standard (ISO 32000-2, 7.6.4) : RC4 40 à 128 bits
+   (révisions 2 à 4), AES-128 (révision 4), AES-256 (révisions 5 et 6).
+   Le mot de passe est vérifié puis le document est déchiffré en mémoire,
+   sur l'appareil, pour être modifié comme un PDF ordinaire.
+   ===================================================================== */
+/* MD5 (RFC 1321) : nécessaire aux révisions 2 à 4, absent de WebCrypto */
+const md5 = (() => {
+  const K = new Uint32Array(64), R = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
+  for (let i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296) >>> 0;
+  return d => {
+    const n = d.length, len = ((n + 8) >>> 6 << 6) + 64, m = new Uint8Array(len);
+    m.set(d); m[n] = 0x80;
+    const dv = new DataView(m.buffer);
+    dv.setUint32(len - 8, (n * 8) >>> 0, true); dv.setUint32(len - 4, Math.floor(n / 536870912), true);
+    let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+    const W = new Uint32Array(16);
+    for (let o = 0; o < len; o += 64) {
+      for (let i = 0; i < 16; i++) W[i] = dv.getUint32(o + i * 4, true);
+      let A = a0, B = b0, C = c0, D = d0;
+      for (let i = 0; i < 64; i++) {
+        let F, g;
+        if (i < 16) { F = (B & C) | (~B & D); g = i; }
+        else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) & 15; }
+        else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) & 15; }
+        else { F = C ^ (B | ~D); g = (7 * i) & 15; }
+        const t = D; D = C; C = B;
+        const x = (A + F + K[i] + W[g]) >>> 0, r = R[(i >> 4) * 4 + (i & 3)];
+        B = (B + ((x << r) | (x >>> (32 - r)))) >>> 0; A = t;
+      }
+      a0 = (a0 + A) >>> 0; b0 = (b0 + B) >>> 0; c0 = (c0 + C) >>> 0; d0 = (d0 + D) >>> 0;
+    }
+    const out = new Uint8Array(16), ov = new DataView(out.buffer);
+    [a0, b0, c0, d0].forEach((v, i) => ov.setUint32(i * 4, v, true));
+    return out;
+  };
+})();
+function rc4(key, data) {
+  const S = new Uint8Array(256); for (let i = 0; i < 256; i++) S[i] = i;
+  for (let i = 0, j = 0; i < 256; i++) { j = (j + S[i] + key[i % key.length]) & 255; const t = S[i]; S[i] = S[j]; S[j] = t; }
+  const out = new Uint8Array(data.length);
+  for (let k = 0, i = 0, j = 0; k < data.length; k++) {
+    i = (i + 1) & 255; j = (j + S[i]) & 255; const t = S[i]; S[i] = S[j]; S[j] = t;
+    out[k] = data[k] ^ S[(S[i] + S[j]) & 255];
+  }
+  return out;
+}
+/* AES-CBC sans contrôle du remplissage : WebCrypto l'exige, on ajoute donc un
+   bloc de remplissage valide calculé, puis on le retire. */
+async function aesDecRaw(key, iv, data) {
+  if (!data.length || data.length % 16) data = data.slice(0, data.length - data.length % 16);
+  if (!data.length) return new Uint8Array(0);
+  const last = data.slice(data.length - 16), pad = new Uint8Array(16).fill(16);
+  for (let i = 0; i < 16; i++) pad[i] ^= last[i];
+  const extra = (await Crypt.aesCbc(key, new Uint8Array(16), pad, true));
+  const k = await crypto.subtle.importKey("raw", key, "AES-CBC", false, ["decrypt"]);
+  const out = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-CBC", iv }, k, Crypt.cat(data, extra)));
+  return out;   /* le bloc ajouté est déjà retiré par WebCrypto */
+}
+const unpad = d => { const n = d[d.length - 1]; return n >= 1 && n <= 16 && n <= d.length && d.slice(d.length - n).every(x => x === n) ? d.slice(0, d.length - n) : d; };
+const PDF_PAD = Uint8Array.from([0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41, 0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01, 0x08,
+  0x2E, 0x2E, 0x00, 0xB6, 0xD0, 0x68, 0x3E, 0x80, 0x2F, 0x0C, 0xA9, 0xFE, 0x64, 0x53, 0x69, 0x7A]);
+const sameBytes = (a, b, n) => { for (let i = 0; i < n; i++) if (a[i] !== b[i]) return false; return true; };
+
+const Unlock = {
+  /* analyse sans décoder : un objet par objet, avec traitement des flux à la volée */
+  parser(bytes, onObj) {
+    const L = window.PDFLib, p = L.PDFParser.forBytesWithOptions(bytes, 200, false);
+    const ENDOBJ = Array.from("endobj", c => c.charCodeAt(0)), T = L.PDFName.of("Type");
+    p.parseIndirectObject = async function () {
+      const ref = this.parseIndirectObjectHeader();
+      this.skipWhitespaceAndComments();
+      let obj = this.parseObject();
+      this.skipWhitespaceAndComments();
+      this.matchKeyword(ENDOBJ);
+      const type = obj instanceof L.PDFRawStream ? obj.dict.lookup(T) : null;
+      if (type === L.PDFName.of("XRef")) { L.PDFXRefStreamParser.forStream(obj).parseIntoContext(); return ref; }
+      if (onObj) obj = await onObj(ref, obj, type);
+      if (onObj && type === L.PDFName.of("ObjStm")) { await L.PDFObjectStreamParser.forStream(obj, this.shouldWaitForTick).parseIntoContext(); return ref; }
+      this.context.assign(ref, obj);
+      return ref;
+    };
+    return p;
+  },
+  /* paramètres de chiffrement, ou null si le document n'est pas chiffré */
+  async info(bytes) {
+    const L = window.PDFLib;
+    const ctx = await Unlock.parser(bytes, null).parseDocument();
+    const ref = ctx.trailerInfo.Encrypt;
+    if (!ref) return null;
+    const E = ctx.lookup(ref);
+    if (!(E instanceof L.PDFDict)) return null;
+    const g = k => E.lookup(L.PDFName.of(k)), num = (k, d) => { const v = g(k); return v instanceof L.PDFNumber ? v.asNumber() : d; };
+    const str = k => { const v = g(k); return v && v.asBytes ? v.asBytes() : new Uint8Array(0); };
+    const filter = g("Filter");
+    if (filter && filter.asString() !== "/Standard") throw new Error("protection « " + filter.asString().slice(1) + " » non prise en charge (certificat)");
+    const V = num("V", 0), R = num("R", 2);
+    let id0 = new Uint8Array(0);
+    const ID = ctx.trailerInfo.ID ? ctx.lookup(ctx.trailerInfo.ID) : null;
+    if (ID instanceof L.PDFArray && ID.size()) { const x = ID.lookup(0); if (x && x.asBytes) id0 = x.asBytes(); }
+    /* méthode par filtre de chiffrement (V4 et V5) */
+    const cfm = name => {
+      if (V < 4) return "rc4";
+      if (!name || name === "/Identity") return "none";
+      const CF = g("CF"), cf = CF instanceof L.PDFDict ? CF.lookup(L.PDFName.of(name.slice(1))) : null;
+      const m = cf instanceof L.PDFDict && cf.lookup(L.PDFName.of("CFM")) ? cf.lookup(L.PDFName.of("CFM")).asString() : "/None";
+      return { "/V2": "rc4", "/AESV2": "aes128", "/AESV3": "aes256" }[m] || "none";
+    };
+    const nm = k => { const v = g(k); return v instanceof L.PDFName ? v.asString() : null; };
+    const em = g("EncryptMetadata");
+    return { ref, V, R, P: num("P", -1) | 0, n: V === 1 ? 5 : Math.max(5, Math.min(16, num("Length", 40) / 8)),
+      O: str("O"), U: str("U"), OE: str("OE"), UE: str("UE"), id0,
+      encMeta: !(em instanceof L.PDFBool) || em.asBoolean(),
+      stm: cfm(nm("StmF") || "/Identity"), str: cfm(nm("StrF") || "/Identity") };
+  },
+  /* clé de chiffrement si le mot de passe est bon : { key, owner } ; sinon null */
+  async key(E, password) {
+    if (E.R >= 5) {
+      const pw = new TextEncoder().encode((password || "").normalize("NFKC")).slice(0, 127);
+      const H = E.R === 5 ? (p, salt, u) => Crypt.sha("SHA-256", Crypt.cat(p, salt, u)) : (p, salt, u) => Crypt.hash(p, salt, u);
+      const U48 = E.U.slice(0, 48), O = E.O, U = E.U;
+      if (sameBytes(await H(pw, O.slice(32, 40), U48), O, 32))
+        return { key: await aesDecRaw(await H(pw, O.slice(40, 48), U48), new Uint8Array(16), E.OE.slice(0, 32)), owner: true };
+      if (sameBytes(await H(pw, U.slice(32, 40), new Uint8Array(0)), U, 32))
+        return { key: await aesDecRaw(await H(pw, U.slice(40, 48), new Uint8Array(0)), new Uint8Array(16), E.UE.slice(0, 32)), owner: false };
+      return null;
+    }
+    const latin = s => Uint8Array.from(Array.from(s || ""), c => { const x = c.codePointAt(0); return x < 256 ? x : 63; }).slice(0, 32);
+    const padded = pw => Crypt.cat(pw, PDF_PAD).slice(0, 32);
+    /* algorithme 2 : clé à partir du mot de passe utilisateur (complété) */
+    const fileKey = pp => {
+      const P4 = new Uint8Array(4); new DataView(P4.buffer).setInt32(0, E.P, true);
+      let k = md5(Crypt.cat(pp, E.O.slice(0, 32), P4, E.id0, E.R >= 4 && !E.encMeta ? new Uint8Array([255, 255, 255, 255]) : new Uint8Array(0)));
+      if (E.R >= 3) for (let i = 0; i < 50; i++) k = md5(k.slice(0, E.n));
+      return k.slice(0, E.n);
+    };
+    /* algorithmes 4 et 5 : contrôle de U */
+    const userOk = k => {
+      if (E.R === 2) return sameBytes(rc4(k, PDF_PAD), E.U, 32);
+      let x = rc4(k, md5(Crypt.cat(PDF_PAD, E.id0)));
+      for (let i = 1; i <= 19; i++) x = rc4(k.map(b => b ^ i), x);
+      return sameBytes(x, E.U, 16);
+    };
+    /* algorithme 7 : mot de passe propriétaire -> mot de passe utilisateur */
+    let ok = fileKey(padded(latin(password)));
+    if (userOk(ok)) {
+      /* le mot de passe utilisateur peut aussi être celui du propriétaire : on le vérifie */
+      return { key: ok, owner: await Unlock.isOwner(E, latin(password), padded, fileKey, userOk) };
+    }
+    if (await Unlock.isOwner(E, latin(password), padded, fileKey, userOk)) {
+      return { key: Unlock._ownerKey, owner: true };
+    }
+    return null;
+  },
+  async isOwner(E, pw, padded, fileKey, userOk) {
+    let k = md5(padded(pw));
+    if (E.R >= 3) for (let i = 0; i < 50; i++) k = md5(k);
+    k = k.slice(0, E.n);
+    let x = E.O.slice(0, 32);
+    if (E.R === 2) x = rc4(k, x);
+    else for (let i = 19; i >= 0; i--) x = rc4(k.map(b => b ^ i), x);
+    const fk = fileKey(x);
+    if (userOk(fk)) { Unlock._ownerKey = fk; return true; }
+    return false;
+  },
+  /* droits accordés sans le mot de passe propriétaire (bits 4 : modifier, 6 : annoter) */
+  canEdit: E => (E.P & 8) !== 0 || (E.P & 32) !== 0,
+  /* document déchiffré, prêt pour pdf.js et pdf-lib */
+  async decrypt(bytes, E, key) {
+    const L = window.PDFLib;
+    const objKey = (ref, aes) => {
+      if (E.R >= 5) return key;
+      const n = ref.objectNumber, g = ref.generationNumber;
+      return md5(Crypt.cat(key, Uint8Array.from([n & 255, (n >> 8) & 255, (n >> 16) & 255, g & 255, (g >> 8) & 255]),
+        aes ? Uint8Array.from([0x73, 0x41, 0x6C, 0x54]) : new Uint8Array(0))).slice(0, Math.min(E.n + 5, 16));
+    };
+    const dec = async (ref, how, data) => {
+      if (how === "none") return data;
+      if (how === "rc4") return rc4(objKey(ref, false), data);
+      if (data.length < 32) return new Uint8Array(0);
+      return unpad(await aesDecRaw(objKey(ref, true), data.slice(0, 16), data.slice(16)));
+    };
+    const decStrings = async (ref, o) => {
+      if (o instanceof L.PDFString || o instanceof L.PDFHexString) return L.PDFHexString.of(Crypt.hex(await dec(ref, E.str, o.asBytes())));
+      if (o instanceof L.PDFDict) { for (const [k, v] of o.entries()) o.set(k, await decStrings(ref, v)); return o; }
+      if (o instanceof L.PDFArray) { for (let i = 0; i < o.size(); i++) o.set(i, await decStrings(ref, o.get(i))); return o; }
+      return o;
+    };
+    const encNum = E.ref.objectNumber, META = L.PDFName.of("Metadata");
+    const parser = Unlock.parser(bytes, async (ref, obj, type) => {
+      if (ref.objectNumber === encNum) return obj;                       /* dictionnaire de chiffrement */
+      if (obj instanceof L.PDFRawStream) {
+        await decStrings(ref, obj.dict);
+        if (type === META && !E.encMeta) return obj;
+        return L.PDFRawStream.of(obj.dict, await dec(ref, E.stm, obj.contents));
+      }
+      return decStrings(ref, obj);
+    });
+    const ctx = await parser.parseDocument();
+    ctx.delete(E.ref);
+    delete ctx.trailerInfo.Encrypt;
+    return L.PDFWriter.forContext(ctx, 200).serializeToBuffer();
+  }
+};
+
 /* ===================================================== PDF/A-2b, 2u et 2a
    2b : image fidèle de chaque page, profil sRGB, métadonnées XMP.
    2u : + couche de texte invisible, en Unicode, police Liberation Sans
@@ -4234,7 +4551,8 @@ async function ocrCurrent() {
   catch (e) { console.error(e); busy(false); toast("Reconnaissance impossible : " + (e && e.message ? e.message : e), 6000); return; }
   busy(false);
   if (!r.pages) { toast("Toutes les pages contiennent déjà du texte : rien à reconnaître.", 4000); return; }
-  if (!(await openBytes(r.bytes, keep.name, { force: true, noRecent: true }))) return;
+  snapshot(true);
+  if (!(await openBytes(r.bytes, keep.name, { force: true, noRecent: true, keepUndo: true }))) { S.undo.pop(); updateUndo(); return; }
   S.items = keep.items; S.values = keep.values; S.wm = keep.wm;
   renderFields(); render(); updatePill();
   Recents.addCurrent();
@@ -5445,9 +5763,63 @@ function initV31() {
   Recents.render();
 }
 
+/* ================================================ versions et mises à jour
+   Nouveautés affichées une fois après chaque mise à jour ; pendant
+   l'utilisation, un bandeau propose de passer à la version téléchargée.     */
+const NEWS = {
+  "4.6.0": ["Ouverture des PDF protégés par un mot de passe (déchiffrés sur le téléphone)",
+            "« Annuler » couvre aussi les champs de formulaire, la rotation et l'organisation des pages, et la reconnaissance du texte",
+            "Numéro de version affiché sous le titre et en bas de l'accueil ; avis de mise à jour"],
+  "4.5.0": ["Texte sélectionnable et cherchable dans les PDF convertis (Word, ODT, PowerPoint, Excel, HTML)",
+            "Reconnaissance du texte (OCR) des scans et des images, sur le téléphone"],
+  "4.4.0": ["Sécurité renforcée : pdf.js à jour, politique de sécurité du contenu",
+            "Signatures conservées sans limite de place"]
+};
+/* réglages présents avant ce lancement (lu avant que le démarrage n'en crée) */
+const HAD_DATA = (() => { try { return localStorage.getItem("pdfed.profiles") !== null; } catch (e) { return false; } })();
+const verNum = v => String(v || "0").split(".").map(Number).reduce((a, x) => a * 1000 + (x || 0), 0);
+function showNews() {
+  let last = null;
+  try { last = localStorage.getItem("pdfed.lastVersion"); } catch (e) {}
+  try { localStorage.setItem("pdfed.lastVersion", APP_VERSION); } catch (e) {}
+  if (last === APP_VERSION) return;
+  /* première installation : rien à annoncer ; version antérieure à 4.6 : aucune trace, mais des réglages existent */
+  if (!last && !HAD_DATA) return;
+  const vers = Object.keys(NEWS).filter(v => verNum(v) > verNum(last || "4.5.0") && verNum(v) <= verNum(APP_VERSION))
+    .sort((a, b) => verNum(b) - verNum(a));
+  $("#newsTitle").textContent = "LeSacAPDF a été mis à jour";
+  $("#newsSub").textContent = (last ? "Version " + last + " → " : "Nouvelle version : ") + "version " + APP_VERSION + ".";
+  $("#newsList").innerHTML = vers.map(v => "<h3>Version " + esc(v) + "</h3><ul>" + NEWS[v].map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>").join("");
+  $("#newsOk").onclick = () => closeSheet();
+  setTimeout(() => openSheet("shNews"), 400);
+}
+function watchUpdates(reg) {
+  /* page déjà servie par une version précédente : sinon c'est la première installation */
+  const hadController = !!navigator.serviceWorker.controller;
+  const check = () => { try { reg.update().catch(() => {}); } catch (e) {} };
+  setInterval(check, 60 * 60 * 1000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
+  const offer = () => {
+    if (!hadController || watchUpdates.shown) return;
+    watchUpdates.shown = true;
+    $("#updBar").hidden = false;
+  };
+  reg.addEventListener("updatefound", () => {
+    const w = reg.installing; if (!w) return;
+    w.addEventListener("statechange", () => { if (w.state === "installed" || w.state === "activated") offer(); });
+  });
+  $("#updLater").onclick = () => { $("#updBar").hidden = true; };
+  $("#updGo").onclick = async () => {
+    if (S.items.length && !(await ask("Mettre à jour maintenant ?",
+        "L'application va redémarrer : les annotations non enregistrées du document seront perdues.", null))) return;
+    location.reload();
+  };
+}
+
 /* ============================================================== démarrage */
 function init() {
   $("#appVer").textContent = "version " + APP_VERSION;
+  $$(".ver").forEach(e => e.textContent = "version " + APP_VERSION);
   initV31();
   initV4();
   initShow();
@@ -5456,6 +5828,7 @@ function init() {
   window.__appStore = store;                                       /* accès pour les tests */
   window.__pdfjsVersion = () => pdfjsLib && pdfjsLib.version;
   window.__docBytes = () => S.bytes ? Array.from(S.bytes) : null;
+  if (!/[?&]shared=1/.test(location.search)) showNews();
   window.__storeReady = KV.load().then(() => { Sigs.render(); Prof.render(); },
     e => console.warn("IndexedDB :", e && e.message));
   initSigSheet();
@@ -5493,7 +5866,7 @@ function init() {
     stamp() { Stamps.open(); },
     wm() { WM.open(); }
   };
-  $$(".tool[data-act]").forEach(b => b.onclick = () => acts[b.dataset.act]());
+  $$(".tool[data-act]").forEach(b => b.onclick = () => { if (roBlock()) return; acts[b.dataset.act](); });
   $("#hintDone").onclick = () => setTool("select");
   $("#btnNewSnip").onclick = () => Snips.openNew();
   $("#txtOk").onclick = textOk;
@@ -5542,6 +5915,7 @@ function init() {
       if (S.items.some(i => i.page === S.cur)) {
         toast("Faites pivoter la page avant d'y ajouter des annotations.", 3500); return;
       }
+      snapshot(true);
       p.rot = (p.rot + 90) % 360;
       const vp = p.page.getViewport({ scale: 1, rotation: p.rot });
       p.dw = vp.width; p.dh = vp.height;
@@ -5587,6 +5961,12 @@ function init() {
     install() { install(); },
     help() { openSheet("shHelp"); }
   };
+  /* lecture seule : actions qui modifient le document */
+  ["organize", "split", "ocr", "wm", "redact", "encrypt", "time", "datetime", "rotate"].forEach(k => {
+    const f = menu[k]; menu[k] = () => { if (roBlock()) { closeSheet(); return; } f(); };
+  });
+  { const f = menu.merge; menu.merge = () => { if (S.doc && roBlock()) { closeSheet(); return; } f(); }; }
+  { const f = menu.print; menu.print = () => { if (S.readOnly && !(S.perm & 4)) { closeSheet(); toast("L'auteur de ce PDF en interdit l'impression."); return; } f(); }; }
   $$("#shMenu [data-m]").forEach(b => b.onclick = () => menu[b.dataset.m]());
   $$("#shLibrary [data-go]").forEach(b => b.onclick = () => {
     if (b.dataset.go === "newsig") Sigs.openNew(); else Snips.openNew();
@@ -5619,8 +5999,8 @@ function init() {
   $("#chkFlatten").onchange = e => { PREF.flatten = e.target.checked; Prof.savePref(); };
 
   /* enregistrement / partage */
-  $("#btnSave").onclick = () => { setTool("select"); select(null); openSave("save"); };
-  $("#btnShare").onclick = () => { setTool("select"); select(null); openSave("share"); };
+  $("#btnSave").onclick = () => { if (roBlock()) return; setTool("select"); select(null); openSave("save"); };
+  $("#btnShare").onclick = () => { if (roBlock()) return; setTool("select"); select(null); openSave("share"); };
   $("#btnPrint").onclick = () => printDoc();
   $$('input[name=smode]').forEach(r => r.onchange = syncSmall);
   $$("#saveFmt button").forEach(b => b.onclick = () => {
@@ -5673,7 +6053,7 @@ function init() {
       $("#saveForm").hidden = true; $("#saveDone").hidden = false;
       $("#doneOpen").hidden = true;
       setDoneMode(S.intent);
-      if (!enc) Recents.add(r.bytes, nm);
+      if (!enc && !S.wasLocked) Recents.add(r.bytes, nm);   /* document déverrouillé : pas de copie en clair */
       $("#shSave").scrollTop = 0;
     } catch (e) {
       console.error(e);
@@ -5807,7 +6187,7 @@ function updatePill() {
 /* mode hors ligne */
 if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch(e => console.warn("service worker :", e));
+    navigator.serviceWorker.register("sw.js").then(watchUpdates).catch(e => console.warn("service worker :", e));
   });
 }
 

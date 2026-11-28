@@ -56,6 +56,7 @@ Une seule fois : *Settings → Pages → Build and deployment → Source : **Git
 | **4.3** — Diaporama | lecture plein écran, une page à la fois : toucher à droite / à gauche, balayage, flèches ou espace ; commandes au centre ; écran maintenu allumé ; s'adapte à la rotation ; annotations et filigrane affichés |
 | **4.4** — Sécurité et fiabilité | pdf.js 6.5 (correctifs de sécurité à jour, repli automatique sur la 3.11 pour les téléphones trop anciens), politique de sécurité du contenu (CSP) : aucun script ni ressource extérieure ne peut être chargé ; signatures enregistrées dans IndexedDB (au-delà des ~5 Mo du stockage précédent, migration automatique) ; tests automatiques à chaque pull request |
 | **4.5** — Texte sélectionnable et OCR | conversions Word, ODT, PowerPoint, Excel, HTML et texte : texte sélectionnable, cherchable et copiable, posé exactement sur la page ; **reconnaissance de texte (OCR)** sur le téléphone, sans envoi (Tesseract.js, français) : scanner (option cochée par défaut), conversion d'images, et menu « Reconnaître le texte » pour un PDF déjà ouvert (annotations conservées) ; les exports Word, texte et PDF/A d'un scan reprennent le texte reconnu |
+| **4.6** — PDF protégés, annulation étendue | ouverture des PDF protégés par mot de passe (RC4 40 à 128 bits, AES-128, AES-256), déchiffrés sur le téléphone ; si l'auteur interdit la modification, mot de passe propriétaire ou lecture seule ; un document déverrouillé n'est pas gardé en clair dans les récents ; « Annuler » couvre aussi les champs de formulaire, la rotation et l'organisation des pages et la reconnaissance du texte (60 étapes, dont 8 avec copie du document) ; version affichée sous le titre et en bas de l'accueil, avis des nouveautés après une mise à jour et bandeau « Mettre à jour » quand une nouvelle version est téléchargée |
 | Confort mobile | pincer pour zoomer, annuler/rétablir, aperçu des pages, mode sombre, hors connexion |
 
 Bon à savoir : sur iPhone, les signatures et textes enregistrés de l'application installée sont
@@ -73,6 +74,7 @@ npm run icons                  # régénère les icônes depuis design/sac-sourc
 
 Séries : `e2e-test.js` (éditeur), `e2e-v31.js` (pages, scanner, recherche…), `e2e-v4.js` (filigrane, chiffrement,
 PDF/A, conversions…), `e2e-show.js` (diaporama), `e2e-storage.js` (signatures, pdf.js, CSP), `e2e-ocr.js` (texte sélectionnable, OCR),
+`e2e-v46.js` (PDF protégés, lecture seule, annulation, version, bouton retour),
 `e2e-export.js` (exports).
 Prérequis hors npm : `pdftotext` et `pdfinfo` (paquet poppler-utils).
 
@@ -83,8 +85,9 @@ Pour empêcher la fusion d'une PR dont les tests échouent : *Settings → Rules
 **Sécurité** : `index.html` contient une politique de sécurité du contenu (balise `<meta http-equiv="Content-Security-Policy">`).
 Toute nouvelle ressource extérieure (police, script, image distante) sera bloquée tant qu'elle n'y est pas ajoutée.
 
-À chaque nouvelle version, augmentez aussi `VERSION` dans `www/sw.js` : l'ancien cache
-est alors purgé proprement.
+À chaque nouvelle version, augmentez `APP_VERSION` dans `www/js/app.js` et `VERSION` dans `www/sw.js`
+(l'ancien cache est alors purgé proprement), et ajoutez ses nouveautés dans `NEWS` (`www/js/app.js`) :
+elles s'affichent une fois sur les téléphones après la mise à jour.
 
 ## Dons (association PROMEDNAV)
 

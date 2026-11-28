@@ -95,7 +95,7 @@
     </button>
     <div class="title">
       <div class="t1" id="docTitle">LeSacAPDF</div>
-      <div class="t2" id="docSub">Remplir · annoter · signer</div>
+      <div class="t2" id="docSub">Tout faire · <span class="ver"></span></div>
     </div>
     <button class="ib" id="btnSearch" aria-label="Rechercher"><svg><use href="#i-search"/></svg></button>
     <button class="ib" id="btnUndo" aria-label="Annuler" disabled><svg><use href="#i-undo"/></svg></button>
@@ -151,7 +151,7 @@
         <li><svg><use href="#i-share"/></svg>Envoi direct par mail, messagerie ou Fichiers</li>
       </ul>
       <button class="link" id="btnInstallHint" hidden><svg><use href="#i-install"/></svg>Installer l'application</button>
-      <p class="owner">© 2026 LESACA Julien — Tous droits réservés</p>
+      <p class="owner">© 2026 LESACA Julien — Tous droits réservés<br><span class="ver"></span></p>
     </section>
     <div id="pages"></div>
   </main>
@@ -540,6 +540,15 @@
   </div>
 </section>
 
+<!-- mise à jour installée : nouveautés -->
+<section class="sheet" id="shNews" aria-label="Nouvelle version">
+  <div class="grab"></div>
+  <h2 id="newsTitle">LeSacAPDF a été mis à jour</h2>
+  <p class="sub" id="newsSub"></p>
+  <div class="news" id="newsList"></div>
+  <div class="actions"><button class="primary" id="newsOk">Compris</button></div>
+</section>
+
 <!-- conversion vers PDF -->
 <section class="sheet" id="shConv" aria-label="Convertir en PDF">
   <div class="grab"></div>
@@ -689,6 +698,12 @@
 
 <div class="spin" id="spin"><div><i></i><span id="spinTxt">Chargement…</span></div></div>
 <div class="toast" id="toast" role="status"></div>
+<!-- nouvelle version téléchargée pendant l'utilisation -->
+<div class="updbar" id="updBar" role="status" hidden>
+  <span>Une nouvelle version de LeSacAPDF est prête.</span>
+  <button class="ghost" id="updLater">Plus tard</button>
+  <button class="primary" id="updGo">Mettre à jour</button>
+</div>
 
 <script src="vendor/pdf-lib.min.js"></script>
 <script src="js/app.js"></script>
