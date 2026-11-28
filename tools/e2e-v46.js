@@ -15,6 +15,7 @@ const ok = (c, m) => { if (!c) throw new Error("ÉCHEC : " + m); console.log("�
 const fx = n => path.join(F, n);
 const info = (f, pw) => execFileSync("pdfinfo", (pw ? ["-upw", pw] : []).concat([f])).toString();
 const text = f => execFileSync("pdftotext", [f, "-"]).toString();
+const VER = require(path.join(__dirname, "..", "package.json")).version;   /* version courante de l'application */
 
 (async () => {
   const b = await chromium.launch();
@@ -30,12 +31,12 @@ const text = f => execFileSync("pdftotext", [f, "-"]).toString();
   const menu = async m => { await p.locator("#btnMenu").tap(); await p.waitForTimeout(300); await p.locator('#shMenu [data-m="' + m + '"]').tap(); };
 
   /* --- version */
-  ok((await p.locator("#docSub").textContent()).startsWith("Tout faire · version 4.6"), "sous le titre : « " + await p.locator("#docSub").textContent() + " »");
-  ok(/version 4\.6/.test(await p.locator(".owner").textContent()), "bas de l'accueil : numéro de version");
+  ok((await p.locator("#docSub").textContent()).startsWith("Tout faire · version " + VER), "sous le titre : « " + await p.locator("#docSub").textContent() + " »");
+  ok((await p.locator(".owner").textContent()).includes("version " + VER), "bas de l'accueil : numéro de version");
   ok(await p.locator("#shNews.on").count() === 0, "première installation : pas d'avis de mise à jour");
   await p.evaluate(() => localStorage.setItem("pdfed.lastVersion", "4.5.0"));
   await p.reload(); await p.waitForSelector("#shNews.on", { timeout: 5000 });
-  ok(/4\.5\.0 → version 4\.6/.test(await p.locator("#newsSub").textContent()) && await p.locator("#newsList li").count() >= 3,
+  ok((await p.locator("#newsSub").textContent()).includes("4.5.0 → version " + VER) && await p.locator("#newsList li").count() >= 3,
     "après mise à jour : avis « " + await p.locator("#newsSub").textContent() + " » et nouveautés");
   await p.locator("#newsOk").tap(); await p.waitForTimeout(400);
   await p.reload(); await p.waitForTimeout(800);

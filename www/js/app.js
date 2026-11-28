@@ -7,7 +7,7 @@
 (function () {
 "use strict";
 
-const APP_VERSION = "4.6.0";
+const APP_VERSION = "4.7.0";
 
 /* Lien de la page de don de l'association PROMEDNAV.
    À RENSEIGNER : tant qu'il est vide, le bouton « Faire un don » affiche
@@ -1763,8 +1763,11 @@ async function buildVector(opt) {
 }
 
 /* ---------------------------------------------- allègement du document
-   Chaque page est rendue en image puis compressée en JPEG jusqu'à tenir
-   dans le budget qui lui revient. Les annotations restent vectorielles. */
+   Version 4.7 : seules les images du PDF sont recompressées (JPEG, taille
+   réduite par paliers) ; le texte, les polices et les tracés restent
+   intacts, donc nets et sélectionnables. En dernier recours seulement, si
+   la taille demandée reste hors d'atteinte, chaque page est rendue en image
+   (ancienne méthode, rasterSmall).                                          */
 const yieldChan = typeof MessageChannel === "function" ? new MessageChannel() : null;
 const yieldQ = [];
 if (yieldChan) yieldChan.port1.onmessage = () => { const f = yieldQ.shift(); if (f) f(); };
@@ -1815,11 +1818,130 @@ async function fitPage(src, tmp, budget, hint) {
 }
 
 async function buildSmall(targetBytes, gray) {
+  const plein = await buildVector();
+  if (!gray && plein.length <= targetBytes) return { bytes: plein, mode: "vector" };
+  let img = null;
+  try { img = await shrinkImages(plein, targetBytes, gray); }
+  catch (e) { console.warn("recompression des images impossible :", e); }
+  if (img && img.bytes.length <= targetBytes) return { bytes: img.bytes, mode: "images", info: img };
+  /* dernier recours : pages en images */
+  const ras = await rasterSmall(targetBytes, gray);
+  /* si même ainsi la limite n'est pas atteinte, on garde le texte net */
+  if (img && ras.bytes.length > targetBytes && img.bytes.length <= ras.bytes.length * 1.15) return { bytes: img.bytes, mode: "images", info: img };
+  return ras;
+}
+
+/* images d'un PDF : décodage (JPEG, ou pixels compressés 8 bits RVB / gris) */
+async function pdfImageBitmap(L, ctx, st) {
+  const d = st.dict, N = n => L.PDFName.of(n);
+  if (d.lookup(N("ImageMask")) || d.lookup(N("Decode"))) return null;
+  let f = d.lookup(N("Filter"));
+  if (f instanceof L.PDFArray) { if (f.size() !== 1) return null; f = f.lookup(0); }
+  const filter = f ? f.asString() : "";
+  let cs = d.lookup(N("ColorSpace")), comps = 0;
+  if (cs instanceof L.PDFName) comps = { "/DeviceRGB": 3, "/DeviceGray": 1, "/CalRGB": 3, "/CalGray": 1 }[cs.asString()] || 0;
+  else if (cs instanceof L.PDFArray) {
+    const fam = cs.lookup(0) && cs.lookup(0).asString();
+    if (fam === "/ICCBased") { const icc = cs.lookup(1); const n = icc && icc.dict ? icc.dict.lookup(N("N")) : null; comps = n ? n.asNumber() : 0; }
+    else if (fam === "/CalRGB") comps = 3; else if (fam === "/CalGray") comps = 1;
+  }
+  if (comps !== 1 && comps !== 3) return null;                          /* CMJN, palette… : inchangés */
+  if (filter === "/DCTDecode") {
+    return createImageBitmap(new Blob([st.contents], { type: "image/jpeg" }));
+  }
+  if (filter !== "/FlateDecode") return null;
+  const bpc = d.lookup(N("BitsPerComponent")), w = d.lookup(N("Width")), h = d.lookup(N("Height"));
+  if (!bpc || bpc.asNumber() !== 8 || !w || !h) return null;
+  const W = w.asNumber(), H = h.asNumber();
+  if (typeof DecompressionStream !== "function") return null;
+  const raw = new Uint8Array(await new Response(new Blob([st.contents]).stream().pipeThrough(new DecompressionStream("deflate"))).arrayBuffer());
+  let dp = d.lookup(N("DecodeParms")); if (dp instanceof L.PDFArray) dp = dp.lookup(0);
+  const pred = dp instanceof L.PDFDict && dp.lookup(N("Predictor")) ? dp.lookup(N("Predictor")).asNumber() : 1;
+  const row = W * comps;
+  let px;
+  if (pred >= 10) {                                                       /* prédicteurs PNG */
+    px = new Uint8Array(row * H);
+    for (let y = 0; y < H; y++) {
+      const ft = raw[y * (row + 1)], s0 = y * (row + 1) + 1, o = y * row;
+      for (let x = 0; x < row; x++) {
+        const a = x >= comps ? px[o + x - comps] : 0, b = y ? px[o - row + x] : 0, c = (x >= comps && y) ? px[o - row + x - comps] : 0;
+        let v = raw[s0 + x];
+        if (ft === 1) v += a; else if (ft === 2) v += b; else if (ft === 3) v += (a + b) >> 1;
+        else if (ft === 4) { const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c); v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c; }
+        px[o + x] = v & 255;
+      }
+    }
+  } else if (pred === 1) px = raw; else return null;
+  if (px.length < row * H) return null;
+  const id = new ImageData(W, H), o = id.data;
+  for (let i = 0, j = 0; i < W * H; i++, j += comps) {
+    o[i * 4] = px[j]; o[i * 4 + 1] = px[j + (comps === 3 ? 1 : 0)]; o[i * 4 + 2] = px[j + (comps === 3 ? 2 : 0)]; o[i * 4 + 3] = 255;
+  }
+  return createImageBitmap(id);
+}
+
+/* recompression des images seules, par paliers, jusqu'à la taille visée */
+async function shrinkImages(bytes, targetBytes, gray) {
+  const L = window.PDFLib, N = n => L.PDFName.of(n);
+  const doc = await L.PDFDocument.load(bytes, { updateMetadata: false });
+  const ctx = doc.context, list = [], masks = new Set();
+  for (const [ref, obj] of ctx.enumerateIndirectObjects()) {
+    if (!(obj instanceof L.PDFRawStream) || obj.dict.lookup(N("Subtype")) !== N("Image")) continue;
+    const sm = obj.dict.get(N("SMask")); if (sm instanceof L.PDFRef) masks.add(sm.toString());
+    list.push({ ref, obj });
+  }
+  /* images retenues : assez lourdes pour valoir la peine, hors masques de transparence */
+  const imgs = list.filter(x => !masks.has(x.ref.toString()) && x.obj.contents.length > 12000).map(x => ({ ...x, orig: x.obj }));
+  if (!imgs.length) return { bytes: await doc.save({ useObjectStreams: true }), count: 0, total: list.length };
+  const levels = [[0.82, 2600], [0.72, 2000], [0.62, 1600], [0.52, 1300], [0.45, 1050], [0.38, 850], [0.32, 680], [0.28, 540]];
+  const cv = document.createElement("canvas"), cx = cv.getContext("2d", { alpha: false });
+  let best = null;
+  for (let li = 0; li < levels.length; li++) {
+    const [q, max] = levels[li];
+    let changed = 0;
+    for (let k = 0; k < imgs.length; k++) {
+      const it = imgs[k];
+      busy(true, "Allègement des images — " + (k + 1) + " sur " + imgs.length + " (palier " + (li + 1) + ")…");
+      await yieldUI();
+      let bmp = null;
+      try { bmp = await pdfImageBitmap(L, ctx, it.orig); } catch (e) { bmp = null; }   /* toujours depuis l'original */
+      if (!bmp) continue;
+      const smk = it.orig.dict.lookup(N("SMask")), matte = smk && smk.dict && smk.dict.lookup(N("Matte"));
+      const s = matte ? 1 : Math.min(1, max / Math.max(bmp.width, bmp.height));
+      cv.width = Math.max(1, Math.round(bmp.width * s)); cv.height = Math.max(1, Math.round(bmp.height * s));
+      cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = "high";
+      cx.fillStyle = "#fff"; cx.fillRect(0, 0, cv.width, cv.height);
+      cx.drawImage(bmp, 0, 0, cv.width, cv.height);
+      if (bmp.close) bmp.close();
+      if (gray) toGray(cx, cv);
+      const blob = await new Promise(r => cv.toBlob(r, "image/jpeg", q));
+      const data = new Uint8Array(await blob.arrayBuffer());
+      /* on ne remplace que si l'image devient nettement plus légère */
+      if (data.length >= it.orig.contents.length * 0.9 && !gray) continue;
+      if (data.length >= it.obj.contents.length && it.obj !== it.orig) continue;
+      const nd = it.orig.dict.clone(ctx);
+      ["Filter", "DecodeParms", "Length", "BitsPerComponent", "ColorSpace", "Width", "Height", "Decode"].forEach(k2 => nd.delete(N(k2)));
+      nd.set(N("Width"), L.PDFNumber.of(cv.width)); nd.set(N("Height"), L.PDFNumber.of(cv.height));
+      nd.set(N("BitsPerComponent"), L.PDFNumber.of(8)); nd.set(N("ColorSpace"), N("DeviceRGB"));
+      nd.set(N("Filter"), N("DCTDecode"));
+      ctx.assign(it.ref, L.PDFRawStream.of(nd, data));
+      it.obj = ctx.lookup(it.ref);
+      changed++;
+    }
+    busy(true, "Allègement — vérification de la taille…");
+    const out = await doc.save({ useObjectStreams: true });
+    best = { bytes: out, count: imgs.length, total: list.length, level: li + 1, quality: q, maxSide: max };
+    if (out.length <= targetBytes || (!changed && li > 0)) break;
+  }
+  cv.width = cv.height = 1;
+  return best;
+}
+
+/* dernier recours : chaque page rendue en image (texte non sélectionnable) */
+async function rasterSmall(targetBytes, gray) {
   const L = window.PDFLib;
   let src = null;
   try {
-    const plein = await buildVector();
-    if (!gray && plein.length <= targetBytes) return { bytes: plein, mode: "vector" };
     const base = await buildVector({ skipItems: true });
     src = await openPdf(base);
   } catch (e) { console.warn("base vectorielle indisponible, pages d'origine :", e); }
@@ -1868,7 +1990,7 @@ async function buildSmall(targetBytes, gray) {
   busy(true, "Finalisation du PDF…");
   await yieldUI();
   if (src) { try { await src.destroy(); } catch (e) {} }
-  return { bytes: await out.save(), mode: "small" };
+  return { bytes: await out.save(), mode: "raster" };
 }
 
 /* ------------------------------------------------ partage / enregistrement */
@@ -1904,12 +2026,14 @@ async function makePdf(mode, targetBytes, gray) {
     if (mode === "small") {
       const r = await buildSmall(targetBytes, gray);
       bytes = r.bytes;
-      note = r.mode === "vector" ? "Déjà sous la limite : qualité d'origine conservée." : "";
+      note = r.mode === "vector" ? "Déjà sous la limite : qualité d'origine conservée."
+        : r.mode === "images" ? (r.info && r.info.count ? "Images allégées, texte net et sélectionnable." : "Texte net conservé.")
+        : "Pages converties en images pour atteindre cette taille : texte non sélectionnable.";
     } else {
       bytes = await buildVector();
     }
     const trop = mode === "small" && bytes.length > targetBytes;
-    if (trop) note = "Limite non atteinte : essayez les niveaux de gris.";
+    if (trop) note = "Limite non atteinte (" + fmtMo(bytes.length) + ") : essayez les niveaux de gris ou une limite plus haute.";
     return { bytes, note };
   } finally {
     busy(false);
@@ -4820,6 +4944,9 @@ const Conv = {
 };
 
 /* ==================================================== comparer deux PDF */
+/* Comparaison (version 4.7) : mots positionnés de chaque ligne. La position d'un mot
+   est estimée en répartissant la largeur du fragment de texte selon le nombre de
+   caractères (approximation, exacte pour une police à chasse fixe).            */
 async function pageLines(doc) {
   const out = [];
   for (let i = 1; i <= doc.numPages; i++) {
@@ -4841,28 +4968,99 @@ async function pageLines(doc) {
     out.push({ w: vp.width, h: vp.height, lines: lines.map(L0 => {
       L0.items.sort((p, q) => p.x - q.x);
       const x0 = Math.min(...L0.items.map(t => t.x)), x1 = Math.max(...L0.items.map(t => t.x + t.w));
+      const words = [];
+      for (const t of L0.items) {
+        const re = /\S+/g, n = t.s.length || 1; let m;
+        while ((m = re.exec(t.s))) words.push({ s: m[0], x: t.x + t.w * m.index / n, w: Math.max(2, t.w * m[0].length / n) });
+      }
       const txt = L0.items.map(t => t.s).join(" ");
-      return { t: txt.replace(/\s+/g, " ").trim(), n: txt.replace(/\s+/g, "").toLowerCase(), x: x0, y: L0.y - L0.h, w: Math.max(4, x1 - x0), h: L0.h * 1.25 };
+      return { t: txt.replace(/\s+/g, " ").trim(), k: txt.replace(/\s+/g, ""), x: x0, y: L0.y - L0.h, w: Math.max(4, x1 - x0),
+               h: L0.h * 1.25, words };
     }) });
     pg.cleanup();
   }
   return out;
 }
-/* plus longue sous-suite commune : lignes identiques des deux côtés */
-function lcsDiff(A, B) {
-  const n = A.length, m = B.length, dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
-  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
-    dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-  const delA = new Set(), addB = new Set();
+/* plus longue sous-suite commune, avec débuts et fins communs retirés d'abord.
+   Renvoie la suite d'opérations ["=", i, j] / ["-", i] / ["+", j], ou null si trop grand. */
+function lcsOps(A, B, maxCells) {
+  const n = A.length, m = B.length;
+  let pre = 0; while (pre < n && pre < m && A[pre] === B[pre]) pre++;
+  let suf = 0; while (suf < n - pre && suf < m - pre && A[n - 1 - suf] === B[m - 1 - suf]) suf++;
+  const a = A.slice(pre, n - suf), b = B.slice(pre, m - suf), N = a.length, M = b.length;
+  if ((N + 1) * (M + 1) > (maxCells || 1.2e7)) return null;
+  const ops = [];
+  for (let i = 0; i < pre; i++) ops.push(["=", i, i]);
+  const W = M + 1, dp = new Uint32Array((N + 1) * W);
+  for (let i = N - 1; i >= 0; i--) for (let j = M - 1; j >= 0; j--)
+    dp[i * W + j] = a[i] === b[j] ? dp[(i + 1) * W + j + 1] + 1 : Math.max(dp[(i + 1) * W + j], dp[i * W + j + 1]);
   let i = 0, j = 0;
-  while (i < n && j < m) {
-    if (A[i] === B[j]) { i++; j++; }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) delA.add(i++);
-    else addB.add(j++);
+  while (i < N && j < M) {
+    if (a[i] === b[j]) { ops.push(["=", pre + i, pre + j]); i++; j++; }
+    else if (dp[(i + 1) * W + j] >= dp[i * W + j + 1]) ops.push(["-", pre + i++]);
+    else ops.push(["+", pre + j++]);
   }
-  while (i < n) delA.add(i++);
-  while (j < m) addB.add(j++);
-  return { delA, addB };
+  while (i < N) ops.push(["-", pre + i++]);
+  while (j < M) ops.push(["+", pre + j++]);
+  for (let k = 0; k < suf; k++) ops.push(["=", n - suf + k, m - suf + k]);
+  return ops;
+}
+/* différences mot par mot : lignes d'abord (sur tout le document), puis mots
+   à l'intérieur des blocs de lignes modifiés. Un simple changement de retour à
+   la ligne (mêmes mots) n'est pas une différence.                            */
+function wordDiff(LA, LB) {
+  const flat = P => { const o = []; P.forEach((pg, pi) => pg.lines.forEach((l, li) => o.push({ pi, li, l }))); return o; };
+  const FA = flat(LA), FB = flat(LB);
+  let groups = [];
+  const ops = lcsOps(FA.map(x => x.l.k), FB.map(x => x.l.k));
+  if (ops) groups.push({ ops, FA, FB });
+  else {                                          /* très long document : page par page */
+    for (let i = 0; i < Math.max(LA.length, LB.length); i++) {
+      const fa = FA.filter(x => x.pi === i), fb = FB.filter(x => x.pi === i);
+      groups.push({ ops: lcsOps(fa.map(x => x.l.k), fb.map(x => x.l.k), 4e7) || [...fa.map((x, k) => ["-", k]), ...fb.map((x, k) => ["+", k])], FA: fa, FB: fb });
+    }
+  }
+  const marks = { A: LA.map(() => []), B: LB.map(() => []) }, diffs = [];
+  const box = (x, w, kind) => ({ x: w.x, y: x.l.y, w: w.w, h: x.l.h, kind });
+  for (const g of groups) {
+    let ha = [], hb = [];
+    const flush = () => {
+      if (!ha.length && !hb.length) return;
+      const wa = [], wb = [];
+      ha.forEach(x => x.l.words.forEach(w => wa.push({ x, w })));
+      hb.forEach(x => x.l.words.forEach(w => wb.push({ x, w })));
+      const wops = lcsOps(wa.map(o => o.w.s), wb.map(o => o.w.s), 6e6) || [...wa.map((o, k) => ["-", k]), ...wb.map((o, k) => ["+", k])];
+      const del = new Set(), add = new Set();
+      wops.forEach(o => { if (o[0] === "-") del.add(o[1]); else if (o[0] === "+") add.add(o[1]); });
+      if (del.size || add.size) {
+        /* lignes concernées : teinte légère ; mots changés : surlignage franc */
+        const touchedA = new Set([...del].map(k => wa[k].x)), touchedB = new Set([...add].map(k => wb[k].x));
+        touchedA.forEach(x => marks.A[x.pi].push({ x: x.l.x, y: x.l.y, w: x.l.w, h: x.l.h, kind: "line" }));
+        touchedB.forEach(x => marks.B[x.pi].push({ x: x.l.x, y: x.l.y, w: x.l.w, h: x.l.h, kind: "line" }));
+        del.forEach(k => marks.A[wa[k].x.pi].push(box(wa[k].x, wa[k].w, "del")));
+        add.forEach(k => marks.B[wb[k].x.pi].push(box(wb[k].x, wb[k].w, "add")));
+        /* une différence par groupe de mots changés contigus (séparés par au moins un mot identique) */
+        let cl = { d: [], a: [] };
+        const push = () => {
+          if (!cl.d.length && !cl.a.length) return;
+          const fa = cl.d.length ? wa[cl.d[0]].x : null, fb = cl.a.length ? wb[cl.a[0]].x : null;
+          diffs.push({ old: cl.d.map(k => wa[k].w.s).join(" "), neu: cl.a.map(k => wb[k].w.s).join(" "),
+            aPage: fa ? fa.pi : null, aY: fa ? fa.l.y : 0, bPage: fb ? fb.pi : null, bY: fb ? fb.l.y : 0 });
+          cl = { d: [], a: [] };
+        };
+        for (const o of wops) { if (o[0] === "=") push(); else if (o[0] === "-") cl.d.push(o[1]); else cl.a.push(o[1]); }
+        push();
+      }
+      ha = []; hb = [];
+    };
+    for (const o of g.ops) {
+      if (o[0] === "=") flush();
+      else if (o[0] === "-") ha.push(g.FA[o[1]]);
+      else hb.push(g.FB[o[1]]);
+    }
+    flush();
+  }
+  return { marks, diffs };
 }
 const Cmp = {
   a: null, b: null, rows: [], diffs: [], cur: -1, mode: "text",
@@ -4881,6 +5079,7 @@ const Cmp = {
       '<button class="primary" id="cmpPick2">' + icon("open") + " Choisir le 2e PDF</button></div>";
     $("#cmpPick2").onclick = () => $("#fileCmp").click();
     $("#cmpBar").hidden = true;
+    $("#cmpList").hidden = true; $("#cmpList").innerHTML = ""; $("#cmpListBtn").setAttribute("aria-pressed", "false");
     openPanel("pnCmp");
     $("#pnCmp")._onclose = () => Cmp.cleanup();
   },
@@ -4897,20 +5096,10 @@ const Cmp = {
       busy(true, "Analyse des différences…");
       const LA = await pageLines(Cmp.a.pdf), LB = await pageLines(Cmp.b.pdf);
       const n = Math.max(LA.length, LB.length);
-      Cmp.rows = []; Cmp.diffs = [];
-      for (let i = 0; i < n; i++) {
-        const A = LA[i], B = LB[i];
-        const row = { i, A, B, delA: new Set(), addB: new Set() };
-        if (A && B) Object.assign(row, lcsDiff(A.lines.map(l => l.n), B.lines.map(l => l.n)));
-        else if (A) A.lines.forEach((l, k) => row.delA.add(k));
-        else B.lines.forEach((l, k) => row.addB.add(k));
-        /* une différence = un bloc de lignes modifiées consécutives */
-        const marks = [...[...row.delA].map(k => ({ y: A.lines[k].y })), ...[...row.addB].map(k => ({ y: B.lines[k].y }))].sort((p, q) => p.y - q.y);
-        let last = -1e9;
-        for (const m of marks) { if (m.y - last > 30) Cmp.diffs.push({ row: i, y: m.y }); last = m.y; }
-        if ((!A || !B) && !marks.length) Cmp.diffs.push({ row: i, y: 0 });
-        Cmp.rows.push(row);
-      }
+      const wd = wordDiff(LA, LB);
+      Cmp.rows = []; Cmp.diffs = wd.diffs;
+      for (let i = 0; i < n; i++) Cmp.rows.push({ i, A: LA[i], B: LB[i], mA: wd.marks.A[i] || [], mB: wd.marks.B[i] || [] });
+      Cmp.renderList();
       $("#cmpSub").textContent = "A : " + Cmp.a.name + " · B : " + Cmp.b.name;
       $("#cmpBar").hidden = false;
       await Cmp.render();
@@ -4937,11 +5126,13 @@ const Cmp = {
         await pg.render({ canvasContext: cv.getContext("2d"), viewport: vp }).promise;
         cell.style.width = colW + "px"; cell.appendChild(cv);
         if (Cmp.mode === "text") {
-          const set = side === "A" ? r.delA : r.addB;
-          for (const idx of set) {
-            const l = info.lines[idx], d = document.createElement("div");
-            d.className = "cmp-hl " + (side === "A" ? "del" : "add");
-            d.style.cssText = "left:" + (l.x * k - 2) + "px;top:" + (l.y * k - 1) + "px;width:" + (l.w * k + 4) + "px;height:" + (l.h * k + 2) + "px";
+          /* lignes modifiées teintées, mots changés surlignés */
+          const ms = (side === "A" ? r.mA : r.mB).slice().sort((p, q) => (p.kind === "line" ? 0 : 1) - (q.kind === "line" ? 0 : 1));
+          for (const mk of ms) {
+            const d = document.createElement("div");
+            d.className = "cmp-hl " + (mk.kind === "line" ? "line " + (side === "A" ? "del" : "add") : mk.kind);
+            const pad = mk.kind === "line" ? 2 : 1;
+            d.style.cssText = "left:" + (mk.x * k - pad) + "px;top:" + (mk.y * k - 1) + "px;width:" + (mk.w * k + 2 * pad) + "px;height:" + (mk.h * k + 2) + "px";
             cell.appendChild(d);
           }
         }
@@ -4968,15 +5159,28 @@ const Cmp = {
     bx.putImageData(bd, 0, 0);
     return n;
   },
-  step(d) {
+  step(d, abs) {
     if (!Cmp.diffs.length) return;
-    Cmp.cur = (Cmp.cur + d + Cmp.diffs.length) % Cmp.diffs.length;
-    const df = Cmp.diffs[Cmp.cur], row = $('.cmp-row[data-row="' + df.row + '"]'), body = $("#cmpBody");
+    Cmp.cur = abs != null ? abs : (Cmp.cur + d + Cmp.diffs.length) % Cmp.diffs.length;
+    const df = Cmp.diffs[Cmp.cur], pi = df.aPage != null ? df.aPage : df.bPage, y = df.aPage != null ? df.aY : df.bY;
+    const row = $('.cmp-row[data-row="' + pi + '"]'), body = $("#cmpBody");
     if (!row) return;
-    const cell = row.querySelector(".cmp-cell canvas"), r = Cmp.rows[df.row], info = r.A || r.B;
+    const cell = row.querySelector(".cmp-cell canvas"), r = Cmp.rows[pi], info = r.A || r.B;
     const k = cell ? parseFloat(cell.style.width) / info.w : 1;
-    body.scrollTo({ top: row.offsetTop + df.y * k - body.clientHeight * 0.3, behavior: "smooth" });
+    body.scrollTo({ top: row.offsetTop + y * k - body.clientHeight * 0.3, behavior: "smooth" });
     $("#cmpCount").textContent = "Différence " + (Cmp.cur + 1) + " sur " + Cmp.diffs.length;
+    $$("#cmpList li").forEach((li, i) => li.classList.toggle("on", i === Cmp.cur));
+  },
+  /* liste des différences : ancien texte -> nouveau texte */
+  renderList() {
+    const ul = $("#cmpList"), cut = t => t.length > 160 ? t.slice(0, 157) + "…" : t;
+    ul.innerHTML = Cmp.diffs.map((df, i) => {
+      const pg = "p. " + ((df.aPage != null ? df.aPage : df.bPage) + 1);
+      const body = df.old && df.neu ? '<del>' + esc(cut(df.old)) + "</del> → <ins>" + esc(cut(df.neu)) + "</ins>"
+        : df.old ? 'supprimé : <del>' + esc(cut(df.old)) + "</del>" : 'ajouté : <ins>' + esc(cut(df.neu)) + "</ins>";
+      return '<li data-i="' + i + '"><small>' + pg + "</small> " + body + "</li>";
+    }).join("") || "<li>Aucune différence de texte.</li>";
+    ul.querySelectorAll("li[data-i]").forEach(li => li.onclick = () => { Cmp.step(0, +li.dataset.i); });
   }
 };
 
@@ -5446,6 +5650,8 @@ async function sheetsToPdf(doc, sheets, onSheet) {
    ===================================================================== */
 const Show = {
   pdf: null, i: 0, n: 0, cache: new Map(), token: 0, hideT: null,
+  auto: false, autoT: null, laser: false, t0: 0, clockT: null,
+  DELAYS: [3, 5, 8, 10, 15, 20, 30, 60],
   async start(from) {
     if (!S.doc) return;
     if (curSheet) closeSheet();
@@ -5463,11 +5669,16 @@ const Show = {
     const el = document.documentElement;
     try { if (el.requestFullscreen && !document.fullscreenElement) await el.requestFullscreen({ navigationUI: "hide" }); } catch (e) {}
     try { if (navigator.wakeLock) Show.lock = await navigator.wakeLock.request("screen"); } catch (e) {}   /* écran toujours allumé */
+    Show.t0 = Date.now(); Show.tick(); clearInterval(Show.clockT); Show.clockT = setInterval(Show.tick, 1000);
+    Show.setAuto(false); Show.setLaser(false); $("#showBlack").hidden = true;
+    $("#showDelay").textContent = Show.delay() + " s";
+    $("#showLoop").setAttribute("aria-pressed", PREF.showLoop ? "true" : "false");
     Show.show();
     Show.chrome(true);
   },
   stop() {
     Show.token++;
+    Show.setAuto(false); Show.setLaser(false); clearInterval(Show.clockT);
     document.body.classList.remove("showing");
     if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
     if (Show.lock) { try { Show.lock.release(); } catch (e) {} Show.lock = null; }
@@ -5514,6 +5725,7 @@ const Show = {
     st.innerHTML = ""; st.appendChild(c);
     c.classList.remove("in-next", "in-prev");
     if (dir) { void c.offsetWidth; c.classList.add(dir > 0 ? "in-next" : "in-prev"); }
+    Show.schedule();                                   /* défilement automatique : délai relancé à chaque page */
     /* préchargement des voisines */
     if (i + 1 < Show.n) Show.render(i + 1).catch(() => {});
     if (i > 0) Show.render(i - 1).catch(() => {});
@@ -5524,19 +5736,107 @@ const Show = {
     if (j >= Show.n) { Show.flash("Fin du document — touchez ✕ pour quitter"); return; }
     Show.i = j; Show.show(d);
   },
+  /* --- défilement automatique */
+  delay() { return Show.DELAYS.includes(PREF.showDelay) ? PREF.showDelay : 5; },
+  setAuto(on) {
+    Show.auto = !!on;
+    const b = $("#showAuto");
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+    b.setAttribute("aria-label", on ? "Mettre en pause" : "Défilement automatique");
+    b.innerHTML = icon(on ? "pause" : "run");
+    if (on) Show.schedule(); else { clearTimeout(Show.autoT); Show.timerBar(0); }
+  },
+  timerBar(sec) {
+    const t = $("#showTimer");
+    t.style.transition = "none"; t.style.width = "0";
+    if (!sec) return;
+    void t.offsetWidth; t.style.transition = "width " + sec + "s linear"; t.style.width = "100%";
+  },
+  schedule() {
+    clearTimeout(Show.autoT);
+    if (!Show.auto || !$("#pnShow").classList.contains("on")) return;
+    const sec = Show.delay();
+    Show.timerBar(sec);
+    Show.autoT = setTimeout(() => {
+      if (Show.i < Show.n - 1) { Show.i++; Show.show(1); }
+      else if (PREF.showLoop) { Show.i = 0; Show.show(1); }
+      else { Show.setAuto(false); Show.flash("Fin du diaporama"); }
+    }, sec * 1000);
+  },
+  nextDelay() {
+    const d = Show.DELAYS, k = d.indexOf(Show.delay());
+    PREF.showDelay = d[(k + 1) % d.length]; Prof.savePref();
+    $("#showDelay").textContent = PREF.showDelay + " s";
+    Show.flash("Défilement : " + PREF.showDelay + " s par page");
+    if (Show.auto) Show.schedule();
+  },
+  toggleLoop() {
+    PREF.showLoop = !PREF.showLoop; Prof.savePref();
+    $("#showLoop").setAttribute("aria-pressed", PREF.showLoop ? "true" : "false");
+    Show.flash(PREF.showLoop ? "Lecture en boucle" : "Arrêt à la dernière page");
+  },
+  /* --- chronomètre de la présentation */
+  tick() {
+    const s = Math.floor((Date.now() - Show.t0) / 1000), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+    $("#showClock").textContent = (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s % 60).padStart(2, "0");
+  },
+  /* --- pointeur laser : point rouge qui suit le doigt (ou la souris), avec une traîne */
+  setLaser(on) {
+    Show.laser = !!on;
+    $("#pnShow").classList.toggle("laser", Show.laser);
+    $("#showLaser").setAttribute("aria-pressed", on ? "true" : "false");
+    Show.trail = []; Show.holding = false; Show.drawLaser();
+    if (on) Show.flash("Pointeur laser : glissez le doigt sur la page");
+  },
+  laserAt(x, y) {
+    Show.trail.push({ x, y, t: performance.now() });
+    if (!Show.laserRaf) Show.laserRaf = requestAnimationFrame(Show.drawLaser);
+  },
+  drawLaser() {
+    Show.laserRaf = 0;
+    const c = $("#showLaserCv"), dpr = window.devicePixelRatio || 1;
+    if (c.width !== Math.round(innerWidth * dpr) || c.height !== Math.round(innerHeight * dpr)) { c.width = Math.round(innerWidth * dpr); c.height = Math.round(innerHeight * dpr); }
+    const x = c.getContext("2d"); x.setTransform(dpr, 0, 0, dpr, 0, 0); x.clearRect(0, 0, innerWidth, innerHeight);
+    const now = performance.now(), LIFE = 450;
+    /* doigt posé (ou souris sur la page) : le point reste visible, seule la traîne s'efface */
+    if (Show.holding && Show.trail && Show.trail.length) { const last = Show.trail[Show.trail.length - 1]; Show.trail.push({ x: last.x, y: last.y, t: now }); }
+    Show.trail = (Show.trail || []).filter(p => now - p.t < LIFE).slice(-80);
+    if (!Show.laser || !Show.trail.length) return;
+    x.lineCap = "round"; x.lineJoin = "round";
+    for (let i = 1; i < Show.trail.length; i++) {
+      const a = Show.trail[i - 1], b = Show.trail[i], k = Math.max(0, 1 - (now - b.t) / LIFE);
+      x.strokeStyle = "rgba(255, 40, 40, " + (0.55 * k).toFixed(3) + ")"; x.lineWidth = 3 + 6 * k;
+      x.beginPath(); x.moveTo(a.x, a.y); x.lineTo(b.x, b.y); x.stroke();
+    }
+    const p = Show.trail[Show.trail.length - 1], k = Math.max(0, 1 - (now - p.t) / LIFE);
+    if (k > 0) {
+      const g = x.createRadialGradient(p.x, p.y, 0, p.x, p.y, 22);
+      g.addColorStop(0, "rgba(255,255,255," + k + ")"); g.addColorStop(0.18, "rgba(255,40,40," + k + ")");
+      g.addColorStop(0.45, "rgba(255,30,30," + (0.45 * k) + ")"); g.addColorStop(1, "rgba(255,0,0,0)");
+      x.fillStyle = g; x.beginPath(); x.arc(p.x, p.y, 22, 0, 7); x.fill();
+    }
+    Show.laserRaf = requestAnimationFrame(Show.drawLaser);
+  },
   flash(msg) { const f = $("#showMsg"); f.textContent = msg; f.classList.add("on"); clearTimeout(Show.msgT); Show.msgT = setTimeout(() => f.classList.remove("on"), 1600); },
-  /* boutons et numéro visibles quelques secondes, puis masqués */
+  /* boutons et numéro visibles quelques secondes, puis masqués (toujours visibles avec le laser) */
   chrome(on) {
-    $("#pnShow").classList.toggle("chrome", on);
+    $("#pnShow").classList.toggle("chrome", on || Show.laser);
     clearTimeout(Show.hideT);
-    if (on) Show.hideT = setTimeout(() => $("#pnShow").classList.remove("chrome"), 2800);
+    if (on && !Show.laser) Show.hideT = setTimeout(() => { if (!Show.laser) $("#pnShow").classList.remove("chrome"); }, 2800);
   }
 };
 function initShow() {
   const st = $("#showStage"), pn = $("#pnShow");
-  let x0 = null, y0 = 0, t0 = 0, swiped = false;
-  st.addEventListener("pointerdown", e => { x0 = e.clientX; y0 = e.clientY; t0 = Date.now(); swiped = false; });
+  let x0 = null, y0 = 0, t0 = 0, swiped = false, laserDown = false;
+  st.addEventListener("pointerdown", e => {
+    if (Show.laser) { laserDown = true; Show.holding = true; try { st.setPointerCapture(e.pointerId); } catch (er) {} Show.laserAt(e.clientX, e.clientY); return; }
+    x0 = e.clientX; y0 = e.clientY; t0 = Date.now(); swiped = false;
+  });
+  st.addEventListener("pointermove", e => {
+    if (Show.laser && (laserDown || e.pointerType === "mouse")) { e.preventDefault(); if (e.pointerType === "mouse") Show.holding = true; Show.laserAt(e.clientX, e.clientY); }
+  });
   st.addEventListener("pointerup", e => {
+    if (Show.laser) { laserDown = false; if (e.pointerType !== "mouse") Show.holding = false; return; }
     if (x0 === null) return;
     const dx = e.clientX - x0, dy = e.clientY - y0;
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5 && Date.now() - t0 < 800) { swiped = true; Show.go(dx < 0 ? 1 : -1); Show.chrome(false); }
@@ -5544,7 +5844,7 @@ function initShow() {
   });
   /* clic : tiers gauche = précédente, tiers central = afficher les commandes, tiers droit = suivante */
   st.addEventListener("click", e => {
-    if (swiped) return;
+    if (swiped || Show.laser) return;
     const w = window.innerWidth;
     if (e.clientX < w / 3) Show.go(-1);
     else if (e.clientX > w * 2 / 3) Show.go(1);
@@ -5554,6 +5854,16 @@ function initShow() {
   $("#showPrev").onclick = e => { e.stopPropagation(); Show.go(-1); Show.chrome(true); };
   $("#showNext").onclick = e => { e.stopPropagation(); Show.go(1); Show.chrome(true); };
   $("#showClose").onclick = e => { e.stopPropagation(); closePanel(); };
+  $("#showAuto").onclick = e => { e.stopPropagation(); Show.setAuto(!Show.auto); Show.chrome(true);
+    if (Show.auto) Show.flash("Défilement automatique : " + Show.delay() + " s par page"); };
+  $("#showDelay").onclick = e => { e.stopPropagation(); Show.nextDelay(); Show.chrome(true); };
+  $("#showLoop").onclick = e => { e.stopPropagation(); Show.toggleLoop(); Show.chrome(true); };
+  $("#showLaser").onclick = e => { e.stopPropagation(); Show.setLaser(!Show.laser); Show.chrome(true); };
+  $("#showBlack").onclick = () => { $("#showBlack").hidden = true; };
+  /* empêcher le défilement de la page pendant le pointage au doigt */
+  st.addEventListener("touchmove", e => { if (Show.laser) e.preventDefault(); }, { passive: false });
+  st.addEventListener("pointerleave", e => { if (e.pointerType === "mouse") Show.holding = false; });
+  st.addEventListener("pointercancel", () => { laserDown = false; Show.holding = false; });
   document.addEventListener("keydown", e => {
     if (!pn.classList.contains("on")) return;
     const k = e.key;
@@ -5562,6 +5872,9 @@ function initShow() {
     else if (k === "Home") { e.preventDefault(); Show.i = 0; Show.show(-1); }
     else if (k === "End") { e.preventDefault(); Show.i = Show.n - 1; Show.show(1); }
     else if (k === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closePanel(); }
+    else if (k === "a" || k === "A") { e.preventDefault(); $("#showAuto").click(); }
+    else if (k === "l" || k === "L") { e.preventDefault(); Show.setLaser(!Show.laser); Show.chrome(true); }
+    else if (k === "b" || k === "B" || k === ".") { e.preventDefault(); $("#showBlack").hidden = !$("#showBlack").hidden; }
   }, true);
   /* rotation de l'écran ou sortie du plein écran : on redessine à la bonne taille */
   let rt = null;
@@ -5661,6 +5974,10 @@ function initV4() {
   $("#cmpPick").onclick = () => $("#fileCmp").click();
   $("#cmpPrev").onclick = () => Cmp.step(-1);
   $("#cmpNext").onclick = () => Cmp.step(1);
+  $("#cmpListBtn").onclick = () => {
+    const ul = $("#cmpList"), on = ul.hidden; ul.hidden = !on;
+    $("#cmpListBtn").setAttribute("aria-pressed", on ? "true" : "false");
+  };
   $$("#cmpMode button").forEach(b => b.onclick = () => {
     Cmp.mode = b.dataset.m; $$("#cmpMode button").forEach(x => x.classList.toggle("on", x === b));
     if (Cmp.rows.length) Cmp.render();
@@ -5767,6 +6084,9 @@ function initV31() {
    Nouveautés affichées une fois après chaque mise à jour ; pendant
    l'utilisation, un bandeau propose de passer à la version téléchargée.     */
 const NEWS = {
+  "4.7.0": ["Fichier allégé : seules les images sont recompressées, le texte reste net et sélectionnable",
+            "Diaporama : défilement automatique (3 s à 1 min par page), lecture en boucle, pointeur laser au doigt, chronomètre",
+            "Comparaison mot par mot, avec la liste des différences « ancien → nouveau »"],
   "4.6.0": ["Ouverture des PDF protégés par un mot de passe (déchiffrés sur le téléphone)",
             "« Annuler » couvre aussi les champs de formulaire, la rotation et l'organisation des pages, et la reconnaissance du texte",
             "Numéro de version affiché sous le titre et en bas de l'accueil ; avis de mise à jour"],

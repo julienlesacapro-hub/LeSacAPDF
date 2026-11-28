@@ -53,10 +53,11 @@ Une seule fois : *Settings → Pages → Build and deployment → Source : **Git
 | **4.1** — Anciens formats Office | Word .doc et PowerPoint .ppt (97-2003) → PDF : texte et structure repris (paragraphes, tableaux, une page par diapositive avec titre et puces), sans les images ni la mise en forme d'origine |
 | **4.0** — Censure définitive | rectangles noirs ou « censurer tous les résultats » d'une recherche ; les pages concernées sont rastérisées à l'enregistrement : le contenu caché est supprimé |
 | **4.0** — Comparer | deux PDF côte à côte, lignes modifiées surlignées (A rouge / B vert), navigation de différence en différence, mode visuel (pixels) |
-| **4.3** — Diaporama | lecture plein écran, une page à la fois : toucher à droite / à gauche, balayage, flèches ou espace ; commandes au centre ; écran maintenu allumé ; s'adapte à la rotation ; annotations et filigrane affichés |
+| **4.3** — Diaporama | lecture plein écran, une page à la fois : toucher à droite / à gauche, balayage, flèches ou espace ; commandes au centre ; écran maintenu allumé ; s'adapte à la rotation ; annotations et filigrane affichés ; clavier : A lecture/pause, L laser, B écran noir |
 | **4.4** — Sécurité et fiabilité | pdf.js 6.5 (correctifs de sécurité à jour, repli automatique sur la 3.11 pour les téléphones trop anciens), politique de sécurité du contenu (CSP) : aucun script ni ressource extérieure ne peut être chargé ; signatures enregistrées dans IndexedDB (au-delà des ~5 Mo du stockage précédent, migration automatique) ; tests automatiques à chaque pull request |
 | **4.5** — Texte sélectionnable et OCR | conversions Word, ODT, PowerPoint, Excel, HTML et texte : texte sélectionnable, cherchable et copiable, posé exactement sur la page ; **reconnaissance de texte (OCR)** sur le téléphone, sans envoi (Tesseract.js, français) : scanner (option cochée par défaut), conversion d'images, et menu « Reconnaître le texte » pour un PDF déjà ouvert (annotations conservées) ; les exports Word, texte et PDF/A d'un scan reprennent le texte reconnu |
 | **4.6** — PDF protégés, annulation étendue | ouverture des PDF protégés par mot de passe (RC4 40 à 128 bits, AES-128, AES-256), déchiffrés sur le téléphone ; si l'auteur interdit la modification, mot de passe propriétaire ou lecture seule ; un document déverrouillé n'est pas gardé en clair dans les récents ; « Annuler » couvre aussi les champs de formulaire, la rotation et l'organisation des pages et la reconnaissance du texte (60 étapes, dont 8 avec copie du document) ; version affichée sous le titre et en bas de l'accueil, avis des nouveautés après une mise à jour et bandeau « Mettre à jour » quand une nouvelle version est téléchargée |
+| **4.7** — Allègement, diaporama, comparaison | **fichier allégé** : seules les images du PDF sont recompressées (JPEG, par paliers de qualité et de résolution), le texte, les polices et les tracés restent intacts ; pages rendues en images seulement en dernier recours, et signalé ; **diaporama** : défilement automatique (3 s à 1 min par page) avec compte à rebours, lecture en boucle, pointeur laser au doigt ou à la souris, chronomètre, écran noir (touche B) ; **comparaison mot par mot** sur tout le document (un texte décalé d'une page à l'autre ou un retour à la ligne différent n'est pas une différence), mots changés surlignés et liste « ancien → nouveau » |
 | Confort mobile | pincer pour zoomer, annuler/rétablir, aperçu des pages, mode sombre, hors connexion |
 
 Bon à savoir : sur iPhone, les signatures et textes enregistrés de l'application installée sont
@@ -74,7 +75,7 @@ npm run icons                  # régénère les icônes depuis design/sac-sourc
 
 Séries : `e2e-test.js` (éditeur), `e2e-v31.js` (pages, scanner, recherche…), `e2e-v4.js` (filigrane, chiffrement,
 PDF/A, conversions…), `e2e-show.js` (diaporama), `e2e-storage.js` (signatures, pdf.js, CSP), `e2e-ocr.js` (texte sélectionnable, OCR),
-`e2e-v46.js` (PDF protégés, lecture seule, annulation, version, bouton retour),
+`e2e-v46.js` (PDF protégés, lecture seule, annulation, version, bouton retour), `e2e-v47.js` (allègement, diaporama, comparaison),
 `e2e-export.js` (exports).
 Prérequis hors npm : `pdftotext` et `pdfinfo` (paquet poppler-utils).
 
