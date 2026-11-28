@@ -334,6 +334,47 @@ input[type=range] { accent-color: var(--brand); }
          opacity: 0; transition: .22s; pointer-events: none; z-index: 90; width: max-content; max-width: calc(100% - 32px);
          text-align: center; font-size: 14px; }
 .toast.on { opacity: 1; transform: translate(-50%, 0); }
+/* ---------- version 4.8 */
+.item.shape svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.item.ffield { border: 1.5px dashed #2D6CDF; background: rgba(45, 108, 223, .10); border-radius: 3px; }
+.item.ffield .fflab { position: absolute; left: 2px; top: -15px; font: 600 10px/1.2 system-ui, sans-serif; color: #2D6CDF; white-space: nowrap;
+  background: rgba(255, 255, 255, .85); padding: 0 3px; border-radius: 3px; pointer-events: none; }
+.item.ff-sig { background: rgba(45, 108, 223, .06) repeating-linear-gradient(135deg, transparent 0 8px, rgba(45, 108, 223, .08) 8px 9px); }
+.hfk { position: absolute; white-space: pre; pointer-events: none; opacity: .9; }
+.ttshl { position: absolute; background: rgba(255, 200, 40, .38); border-radius: 2px; pointer-events: none; mix-blend-mode: multiply; }
+.ttsbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--sab, 0px) + var(--tbh, 0px) + 12px); z-index: 60;
+  display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-radius: 26px; background: #17202C; color: #fff; box-shadow: 0 10px 30px rgba(0,0,0,.3); }
+.ttsbar[hidden] { display: none; }
+.ttsbar .ib { color: #fff; }
+.ttsbar .sc { color: #fff; background: rgba(255,255,255,.14); border: 0; border-radius: 14px; padding: 6px 10px; font: 600 13px/1 system-ui, sans-serif; }
+.ttsbar #ttsInfo { font-size: 12.5px; opacity: .8; padding: 0 6px; white-space: nowrap; }
+.choices { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.choices button { display: grid; justify-items: start; gap: 2px; text-align: left; padding: 12px; border-radius: 14px; border: 1px solid var(--line, rgba(0,0,0,.1));
+  background: var(--surface-2); color: inherit; font: inherit; }
+.choices svg { width: 24px; height: 24px; color: var(--brand); margin-bottom: 4px; }
+.choices small { color: var(--muted); font-size: 12px; }
+.row2 { display: flex; gap: 8px; margin: 10px 0 6px; }
+.row2 > * { flex: 1; }
+.ollist, .cmtlist, .privlist { list-style: none; margin: 8px 0 0; padding: 0; }
+.ollist li { display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--line, rgba(0,0,0,.07)); }
+.ollist .olgo { flex: 1; display: flex; align-items: baseline; gap: 8px; text-align: left; background: none; border: 0; color: inherit; font: inherit; padding: 10px 4px; min-width: 0; }
+.ollist .olgo .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ollist .olgo small, .cmtlist small, h2 small { color: var(--muted); font-weight: 500; font-size: 12.5px; }
+.ollist .ib { width: 36px; height: 36px; }
+.ollist .olempty, .cmtlist li { padding: 10px 4px; color: var(--muted); }
+.cmtlist li { border-bottom: 1px solid var(--line, rgba(0,0,0,.07)); cursor: pointer; color: inherit; }
+.cmtlist p { margin: 3px 0 0; white-space: pre-wrap; }
+.privlist li { display: grid; gap: 1px; padding: 8px 2px; border-bottom: 1px solid var(--line, rgba(0,0,0,.07)); }
+.privlist span { color: var(--muted); font-size: 13.5px; word-break: break-word; }
+.cropprev { display: grid; place-items: center; background: var(--surface-2); border-radius: 12px; padding: 10px; margin: 8px 0; }
+.cropwrap { position: relative; line-height: 0; }
+.cropwrap canvas { box-shadow: 0 1px 6px rgba(0,0,0,.2); }
+.cropframe { position: absolute; outline: 2px solid #E2AC72; box-shadow: 0 0 0 9999px rgba(0, 0, 0, .45); pointer-events: none; }
+.cropprev { overflow: hidden; }
+.rng span { min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+.orgmore { display: flex; gap: 6px; flex-wrap: wrap; }
+.orgmore .ghost.on { background: var(--brand); color: var(--brand-ink, #fff); }
+.pfoot { flex-wrap: wrap; }
 /* version 4.6 : mise à jour */
 .updbar { position: fixed; left: 12px; right: 12px; bottom: calc(var(--sab, 0px) + var(--tbh, 0px) + 10px); z-index: 95; display: flex; align-items: center;
           gap: 8px; flex-wrap: wrap; padding: 12px 14px; border-radius: 16px; background: #17202C; color: #fff;

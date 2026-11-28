@@ -58,6 +58,7 @@ Une seule fois : *Settings → Pages → Build and deployment → Source : **Git
 | **4.5** — Texte sélectionnable et OCR | conversions Word, ODT, PowerPoint, Excel, HTML et texte : texte sélectionnable, cherchable et copiable, posé exactement sur la page ; **reconnaissance de texte (OCR)** sur le téléphone, sans envoi (Tesseract.js, français) : scanner (option cochée par défaut), conversion d'images, et menu « Reconnaître le texte » pour un PDF déjà ouvert (annotations conservées) ; les exports Word, texte et PDF/A d'un scan reprennent le texte reconnu |
 | **4.6** — PDF protégés, annulation étendue | ouverture des PDF protégés par mot de passe (RC4 40 à 128 bits, AES-128, AES-256), déchiffrés sur le téléphone ; si l'auteur interdit la modification, mot de passe propriétaire ou lecture seule ; un document déverrouillé n'est pas gardé en clair dans les récents ; « Annuler » couvre aussi les champs de formulaire, la rotation et l'organisation des pages et la reconnaissance du texte (60 étapes, dont 8 avec copie du document) ; version affichée sous le titre et en bas de l'accueil, avis des nouveautés après une mise à jour et bandeau « Mettre à jour » quand une nouvelle version est téléchargée |
 | **4.7** — Allègement, diaporama, comparaison | **fichier allégé** : seules les images du PDF sont recompressées (JPEG, par paliers de qualité et de résolution), le texte, les polices et les tracés restent intacts ; pages rendues en images seulement en dernier recours, et signalé ; **diaporama** : défilement automatique (3 s à 1 min par page) avec compte à rebours, lecture en boucle, pointeur laser au doigt ou à la souris, chronomètre, écran noir (touche B) ; **comparaison mot par mot** sur tout le document (un texte décalé d'une page à l'autre ou un retour à la ligne différent n'est pas une différence), mots changés surlignés et liste « ancien → nouveau » |
+| **4.8** — Relecture, mise en page, confidentialité | **commentaires et formes** (note en bulle, flèche, rectangle, ligne) enregistrés comme de vraies annotations PDF (auteur = nom du profil), lisibles dans Acrobat ; liste des commentaires, y compris ceux faits ailleurs ; **en-têtes, pieds de page, numérotation** ({page}, {pages}, {date}, {fichier}, page de garde exclue) ; **signets et sommaire** : lecture, ajout, renommage, détection des titres, écrits dans le PDF ; **données cachées** : inspection puis effacement (auteur, logiciels, dates, XMP, historique, objets inutilisés, scripts, pièces jointes) ; **lecture à voix haute** (synthèse vocale du téléphone, phrase surlignée, vitesse) ; **organiser** : page blanche, recadrage (marges blanches automatiques), tout au format A4 ; **création de champs** texte, case à cocher, zone de signature |
 | Confort mobile | pincer pour zoomer, annuler/rétablir, aperçu des pages, mode sombre, hors connexion |
 
 Bon à savoir : sur iPhone, les signatures et textes enregistrés de l'application installée sont
@@ -75,9 +76,10 @@ npm run icons                  # régénère les icônes depuis design/sac-sourc
 
 Séries : `e2e-test.js` (éditeur), `e2e-v31.js` (pages, scanner, recherche…), `e2e-v4.js` (filigrane, chiffrement,
 PDF/A, conversions…), `e2e-show.js` (diaporama), `e2e-storage.js` (signatures, pdf.js, CSP), `e2e-ocr.js` (texte sélectionnable, OCR),
-`e2e-v46.js` (PDF protégés, lecture seule, annulation, version, bouton retour), `e2e-v47.js` (allègement, diaporama, comparaison),
+`e2e-v46.js` (PDF protégés, lecture seule, annulation, version, bouton retour), `e2e-v47.js` (allègement, diaporama, comparaison), `e2e-v48.js` (commentaires, champs, en-têtes, signets, données cachées, voix, organiser),
 `e2e-export.js` (exports).
-Prérequis hors npm : `pdftotext` et `pdfinfo` (paquet poppler-utils).
+Prérequis hors npm : `pdftotext` et `pdfinfo` (paquet poppler-utils) ; facultatif : `pikepdf` (Python) pour vérifier
+les annotations, champs et signets produits (variable `PYTHON` pour choisir l'interpréteur).
 
 Le workflow `.github/workflows/tests.yml` les lance sur GitHub à chaque pull request et à chaque envoi sur `main`.
 Pour empêcher la fusion d'une PR dont les tests échouent : *Settings → Rules → Rulesets* → la règle de `main` →

@@ -69,6 +69,19 @@
     <symbol id="i-play" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M10 8v5l4-2.5z" fill="currentColor"/><path d="M8 21h8M12 17v4"/></symbol>
     <symbol id="i-print" viewBox="0 0 24 24"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/></symbol>
     <symbol id="i-ocr" viewBox="0 0 24 24"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M8 9h8M12 9v7"/></symbol>
+    <symbol id="i-note" viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H11l-4.5 4v-4h-1A1.5 1.5 0 0 1 4 14.5z"/><path d="M8 8.5h8M8 11.5h5"/></symbol>
+    <symbol id="i-shapes" viewBox="0 0 24 24"><path d="M4 20 14 10M14 10h-5M14 10v5"/><rect x="13" y="3" width="8" height="6" rx="1"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 19 19 5M19 5h-7M19 5v7"/></symbol>
+    <symbol id="i-rect" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1"/></symbol>
+    <symbol id="i-line" viewBox="0 0 24 24"><path d="M5 19 19 5"/></symbol>
+    <symbol id="i-field" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="10" rx="1.5"/><path d="M7 10v4M6 10h2M6 14h2"/></symbol>
+    <symbol id="i-hf" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M8 6.5h8M8 17.5h3M14.5 17.5h1.5M8 10.5h8M8 13.5h8" opacity=".9"/></symbol>
+    <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M7 3.5h10a1 1 0 0 1 1 1V21l-6-4-6 4V4.5a1 1 0 0 1 1-1z"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5.5c0 4.3 3 7.9 7 9.5 4-1.6 7-5.2 7-9.5V6z"/><path d="m9 12 2.2 2.2L15.5 10"/></symbol>
+    <symbol id="i-speak" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></symbol>
+    <symbol id="i-crop" viewBox="0 0 24 24"><path d="M6 2.5V18h15.5M2.5 6H18v15.5"/></symbol>
+    <symbol id="i-a4" viewBox="0 0 24 24"><rect x="5.5" y="2.5" width="13" height="19" rx="1.2"/><path d="M8.5 15.5l1.6-5 1.6 5M9 14h2.3M14 10.5v5M14 10.5l-1.6 3.2h2.6" stroke-width="1.4"/></symbol>
+    <symbol id="i-comments" viewBox="0 0 24 24"><path d="M3.5 5.5A1.5 1.5 0 0 1 5 4h10a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 15 13H9l-3.5 3v-3H5a1.5 1.5 0 0 1-1.5-1.5z"/><path d="M19 8.5h.5A1.5 1.5 0 0 1 21 10v6a1.5 1.5 0 0 1-1.5 1.5H19V20l-3-2.5h-4"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
     <symbol id="i-stamp" viewBox="0 0 24 24"><path d="M9.5 3.5h5l-1 7h4a2 2 0 0 1 2 2v3H4.5v-3a2 2 0 0 1 2-2h4z"/><path d="M5 19.5h14"/></symbol>
     <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8a2 2 0 0 1 2-2h2l1.5-2h5L16 6h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.5"/></symbol>
@@ -183,6 +196,9 @@
       <button class="tool" data-tool="cross"><svg><use href="#i-cross"/></svg><span>Croix</span></button>
       <button class="tool" data-act="date"><svg><use href="#i-date"/></svg><span>Date</span></button>
       <button class="tool" data-tool="circle"><svg><use href="#i-circle"/></svg><span>Entourer</span></button>
+      <button class="tool" data-tool="note"><svg><use href="#i-note"/></svg><span>Note</span></button>
+      <button class="tool" data-act="shapes"><svg><use href="#i-shapes"/></svg><span>Formes</span></button>
+      <button class="tool" data-act="fields"><svg><use href="#i-field"/></svg><span>Champ</span></button>
       <button class="tool" data-tool="pen"><svg><use href="#i-pen"/></svg><span>Stylo</span></button>
       <button class="tool" data-tool="marker"><svg><use href="#i-marker"/></svg><span>Surligner</span></button>
       <button class="tool" data-tool="mask"><svg><use href="#i-mask"/></svg><span>Masquer</span></button>
@@ -214,6 +230,11 @@
     <button data-m="redact" class="needdoc"><svg><use href="#i-redact"/></svg>Censurer définitivement</button>
     <button data-m="encrypt" class="needdoc"><svg><use href="#i-key"/></svg>Protéger par mot de passe</button>
     <button data-m="ocr" class="needdoc"><svg><use href="#i-ocr"/></svg>Reconnaître le texte (OCR) <small>rendre un scan sélectionnable et cherchable</small></button>
+    <button data-m="comments" class="needdoc"><svg><use href="#i-comments"/></svg>Commentaires <small>liste, y compris ceux d'Acrobat</small></button>
+    <button data-m="outline" class="needdoc"><svg><use href="#i-bookmark"/></svg>Signets et sommaire</button>
+    <button data-m="hf" class="needdoc"><svg><use href="#i-hf"/></svg>En-tête, pied de page, numéros</button>
+    <button data-m="speak" class="needdoc"><svg><use href="#i-speak"/></svg>Lire à voix haute</button>
+    <button data-m="privacy" class="needdoc"><svg><use href="#i-shield"/></svg>Données cachées <small>auteur, logiciel, historique…</small></button>
     <button data-m="search" class="needdoc"><svg><use href="#i-search"/></svg>Rechercher dans le document</button>
     <button data-m="print" class="needdoc"><svg><use href="#i-print"/></svg>Imprimer</button>
     <hr>
@@ -412,6 +433,7 @@
       <label class="chk"><input type="checkbox" id="saveGray"> Images en niveaux de gris (plus léger)</label>
     </div>
     </div>
+    <label class="chk" id="cleanRow"><input type="checkbox" id="saveClean"> Effacer les données cachées (auteur, logiciel, historique…)</label>
     <label class="chk" id="encRow"><input type="checkbox" id="encOn"> Protéger par un mot de passe (chiffrement AES-256)</label>
     <div id="encBox" hidden>
       <label class="field-l">Mot de passe<input type="password" id="encPwd" autocomplete="new-password"></label>
@@ -551,6 +573,87 @@
   <p class="sub" id="newsSub"></p>
   <div class="news" id="newsList"></div>
   <div class="actions"><button class="primary" id="newsOk">Compris</button></div>
+</section>
+
+<!-- version 4.8 : formes, champs, en-têtes, signets, confidentialité, commentaires, recadrage -->
+<section class="sheet" id="shShapes" aria-label="Formes">
+  <div class="grab"></div>
+  <h2>Formes et notes</h2>
+  <p class="sub">Enregistrées comme de vrais commentaires PDF : visibles et modifiables dans Acrobat et les autres lecteurs.</p>
+  <div class="choices">
+    <button data-t="note"><svg><use href="#i-note"/></svg><b>Note</b><small>bulle avec un texte</small></button>
+    <button data-t="arrow"><svg><use href="#i-arrow"/></svg><b>Flèche</b><small>tracée au doigt</small></button>
+    <button data-t="rect"><svg><use href="#i-rect"/></svg><b>Rectangle</b><small>encadrer une zone</small></button>
+    <button data-t="line"><svg><use href="#i-line"/></svg><b>Ligne</b><small>souligner, relier</small></button>
+  </div>
+  <p class="sub">Touchez une forme posée puis « Commentaire » pour y joindre un texte.</p>
+</section>
+
+<section class="sheet" id="shFields" aria-label="Créer un champ">
+  <div class="grab"></div>
+  <h2>Créer un champ de formulaire</h2>
+  <p class="sub">Tracez la zone sur la page. Le champ devient remplissable dans le PDF enregistré (ici, à la réouverture, ou dans tout lecteur de PDF).</p>
+  <div class="choices">
+    <button data-t="ff-text"><svg><use href="#i-field"/></svg><b>Texte</b><small>nom, adresse, date…</small></button>
+    <button data-t="ff-check"><svg><use href="#i-check"/></svg><b>Case à cocher</b><small>oui / non</small></button>
+    <button data-t="ff-sig"><svg><use href="#i-sign"/></svg><b>Zone de signature</b><small>signature électronique</small></button>
+  </div>
+</section>
+
+<section class="sheet tall" id="shHF" aria-label="En-tête et pied de page">
+  <div class="grab"></div>
+  <h2>En-tête, pied de page, numéros</h2>
+  <p class="sub">Variables : {page}, {pages}, {date}, {fichier}. Aperçu en direct sur le document.</p>
+  <label class="field-l">En-tête<input type="text" id="hfHead" placeholder="ex. Dossier Dupont — {date}"></label>
+  <label class="field-l inline">Alignement <select id="hfHeadAl"><option value="left">Gauche</option><option value="center">Centre</option><option value="right">Droite</option></select></label>
+  <label class="field-l">Pied de page<input type="text" id="hfFoot" placeholder="ex. Confidentiel"></label>
+  <label class="field-l inline">Alignement <select id="hfFootAl"><option value="left">Gauche</option><option value="center">Centre</option><option value="right">Droite</option></select></label>
+  <label class="field-l">Numérotation des pages <select id="hfNum"><option value="none">Aucune</option><option value="n">1</option><option value="page">Page 1</option>
+    <option value="pageof">Page 1 sur 12</option><option value="slash">1 / 12</option></select></label>
+  <label class="field-l inline">Position (en bas) <select id="hfNumAl"><option value="left">Gauche</option><option value="center">Centre</option><option value="right">Droite</option></select></label>
+  <label class="field-l inline">Premier numéro <input type="number" id="hfStart" min="0" max="9999" value="1" inputmode="numeric"></label>
+  <label class="field-l inline">Taille du texte <input type="number" id="hfSize" min="6" max="20" step="0.5" value="9" inputmode="decimal"> pt</label>
+  <label class="chk"><input type="checkbox" id="hfSkip"> Rien sur la première page (page de garde)</label>
+  <div class="actions"><button class="ghost" id="hfOff">Retirer</button><button class="primary" id="hfOk">Valider</button></div>
+</section>
+
+<section class="sheet tall" id="shOutline" aria-label="Signets et sommaire">
+  <div class="grab"></div>
+  <h2>Signets et sommaire <small id="olCount"></small></h2>
+  <p class="sub">Touchez un signet pour y aller. Les signets sont enregistrés dans le PDF (volet « Signets » des lecteurs).</p>
+  <div class="row2"><button class="ghost" id="olAdd"><svg><use href="#i-plus"/></svg>Signet ici</button>
+    <button class="ghost" id="olDetect"><svg><use href="#i-search"/></svg>Détecter les titres</button></div>
+  <ul class="ollist" id="olList"></ul>
+</section>
+
+<section class="sheet tall" id="shComments" aria-label="Commentaires">
+  <div class="grab"></div>
+  <h2>Commentaires <small id="cmtCount"></small></h2>
+  <p class="sub">Commentaires du document (y compris ceux faits dans Acrobat) et ceux ajoutés ici.</p>
+  <ul class="cmtlist" id="cmtList"></ul>
+</section>
+
+<section class="sheet tall" id="shPrivacy" aria-label="Données cachées">
+  <div class="grab"></div>
+  <h2>Données cachées</h2>
+  <p class="sub">Ce que le fichier contient en plus des pages :</p>
+  <ul class="privlist" id="privList"></ul>
+  <label class="chk"><input type="checkbox" id="privOn"> Tout effacer à l'enregistrement</label>
+  <p class="sub">Effacés : auteur, logiciels, dates, titre, métadonnées XMP, historique des modifications, objets inutilisés,
+    scripts, pièces jointes, auteurs des commentaires, vignettes. Les pages, le texte et les champs ne changent pas.</p>
+  <div class="actions"><button class="primary" id="privOk">Valider</button></div>
+</section>
+
+<section class="sheet" id="shCrop" aria-label="Recadrer">
+  <div class="grab"></div>
+  <h2>Recadrer</h2>
+  <p class="sub" id="cropSub"></p>
+  <div class="cropprev" id="cropPrev"><div class="cropwrap"><canvas id="cropCv"></canvas><div class="cropframe" id="cropFrame"></div></div></div>
+  <label class="rng full">Haut <input type="range" id="cropT" min="0" max="45" value="0"><span id="cropTV"></span></label>
+  <label class="rng full">Bas <input type="range" id="cropB" min="0" max="45" value="0"><span id="cropBV"></span></label>
+  <label class="rng full">Gauche <input type="range" id="cropL" min="0" max="45" value="0"><span id="cropLV"></span></label>
+  <label class="rng full">Droite <input type="range" id="cropR" min="0" max="45" value="0"><span id="cropRV"></span></label>
+  <div class="actions"><button class="ghost" id="cropAuto">Marges blanches</button><button class="ghost" id="cropNone">Retirer</button><button class="primary" id="cropOk">Appliquer</button></div>
 </section>
 
 <!-- conversion vers PDF -->
@@ -713,6 +816,15 @@
 
 <div class="spin" id="spin"><div><i></i><span id="spinTxt">Chargement…</span></div></div>
 <div class="toast" id="toast" role="status"></div>
+<!-- lecture à voix haute -->
+<div class="ttsbar" id="ttsBar" role="toolbar" aria-label="Lecture à voix haute" hidden>
+  <button class="ib" id="ttsPrev" aria-label="Phrase précédente"><svg><use href="#i-left"/></svg></button>
+  <button class="ib" id="ttsPlay" aria-label="Pause"><svg><use href="#i-pause"/></svg></button>
+  <button class="ib" id="ttsNext" aria-label="Phrase suivante"><svg><use href="#i-right"/></svg></button>
+  <button class="sc" id="ttsRate" aria-label="Vitesse">× 1</button>
+  <span id="ttsInfo"></span>
+  <button class="ib" id="ttsStop" aria-label="Arrêter la lecture"><svg><use href="#i-close"/></svg></button>
+</div>
 <!-- nouvelle version téléchargée pendant l'utilisation -->
 <div class="updbar" id="updBar" role="status" hidden>
   <span>Une nouvelle version de LeSacAPDF est prête.</span>
