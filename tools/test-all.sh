@@ -33,6 +33,7 @@ for d in $DEVS; do
   run "$d-ocr"       node tools/e2e-ocr.js     $F "$OUT/$d" "$d"
   run "$d-v46"       node tools/e2e-v46.js     $F "$OUT/$d" "$d"
   run "$d-v47"       node tools/e2e-v47.js     $F "$OUT/$d" "$d"
+  run "$d-v48"       node tools/e2e-v48.js     $F "$OUT/$d" "$d"
 done
 case " $DEVS " in *" android "*) run "exports" node tools/e2e-export.js $F/test.pdf "$OUT/exports" ;; esac
 

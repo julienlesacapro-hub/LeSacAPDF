@@ -36,6 +36,7 @@ jobs:
         run: |
           npx playwright install --with-deps chromium
           sudo apt-get install -y --no-install-recommends poppler-utils
+          python3 -m pip install --user pikepdf==10.18.2   # lecture indépendante des annotations, champs et signets
       - name: Tests
         run: tools/test-all.sh ${{ matrix.device }} test-results
       - uses: actions/upload-artifact@v4
